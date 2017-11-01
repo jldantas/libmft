@@ -19,6 +19,7 @@ MFT record # - 4 (xp only?)
 '''
 
 ''' ******ATTRIBUTE HEADER DOC********
+https://flatcap.org/linux-ntfs/ntfs/concepts/attribute_header.html
 Attribute type id - 4
 Length of the attribute - 4
 non-resident flag - 1 (0 - resident, 1 - non-resident)
@@ -86,6 +87,7 @@ accessed time - 8
 allocated size of file - 8 (multiple of the cluster size)
 real size of file - 8 (actual file size, might also be stored by the directory)
 flags - 4 (see FLAGS FOR STANDARD_INFORMATION AND FILE_NAME DOC)
+reparse value - 4
 name length - 1
 name type - 1
   0 - POSIX - unicode, case sensitve

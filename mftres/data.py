@@ -1,22 +1,11 @@
 import struct
-from datetime import datetime as _datetime, timedelta as _timedelta
+#from datetime import datetime as _datetime, timedelta as _timedelta
 import enum
 import collections
 
-class MftHeaderSig(enum.Enum):
-    STANDARD_INFORMATION = 0x10
-    ATTRIBUTE_LIST = 0x20
-    FILE_NAME = 0x30
-    OBJECT_ID = 0X40
-    SECURITY_DESCRIPTOR = 0x50
-    VOLUME_NAME = 0x60
-    VOLUME_INFORMATION = 0x70
-    DATA = 0x80
-    INDEX_ROOT = 0x90
-    INDEX_ALLOCATION = 0xA0
-    BITMAP = 0xB0
-    REPARSE_POINT = 0xC0
-    LOGGED_TOOL_STREAM = 0x100
+from util.functions import convert_filetime
+from mftres.attributes import AttrTypes, StandardInformation, StdInfoFlags, \
+    FileName, IndexRoot
 
 class MftSignature(enum.Enum):
     FILE = b"FILE"
@@ -28,6 +17,7 @@ class MftUsageFlags(enum.Enum):
     IN_USE = 0x0001
     DIRECTORY = 0x0002
     DIRECTORY_IN_USE = 0x0003
+    UNKNOW = 0xFFFF
 
 class MFTHeader():
     #TODO create a way of dealing with XP only artefacts
@@ -43,7 +33,11 @@ class MFTHeader():
         self.seq_number = temp[4]
         self.hard_link_count = temp[5]
         self.first_attr_offset = temp[6]
-        self.usage_flags = MftUsageFlags(temp[7])
+        try:
+            self.usage_flags = MftUsageFlags(temp[7])
+        except ValueError:
+            #TODO logging
+            self.usage_flags = MftUsageFlags.UNKNOW
         self.mft_size = temp[8]
         self.mft_alloc_size = temp[9]
         self.parent_dir = temp[10]
@@ -71,21 +65,6 @@ class MFTHeader():
             self.hard_link_count, self.first_attr_offset, self.usage_flags, self.mft_size,
             self.mft_alloc_size, self.parent_dir, self.next_attr_id, self.padding,
             self.mft_record)
-
-class AttrTypes(enum.Enum):
-    STANDARD_INFORMATION = 0x10
-    ATTRIBUTE_LIST = 0x20
-    FILE_NAME = 0x30
-    OBJECT_ID = 0X40
-    SECURITY_DESCRIPTOR = 0x50
-    VOLUME_NAME = 0x60
-    VOLUME_INFORMATION = 0x70
-    DATA = 0x80
-    INDEX_ROOT = 0x90
-    INDEX_ALLOCATION = 0xA0
-    BITMAP = 0xB0
-    REPARSE_POINT = 0xC0
-    LOGGED_TOOL_STREAM = 0x100
 
 class AttrNonResident(enum.Enum):
     NO = 0x0
@@ -122,6 +101,10 @@ class AttributeHeader():
         self.attr_id = temp[6]
         self.resident_header = None
         self.non_resident_header = None
+        self.attr_name = None
+
+        if self.name_len:
+            self.attr_name = header_view[self.name_offset:self.name_offset+(2*self.name_len)].tobytes().decode("utf_16_le")
 
         if self.nonresident_flag is AttrNonResident.NO:
             self.resident_header = ResidentAttrHeader._make(self._REPR_RESIDENT.unpack(header_view[self._REPR.size:self._REPR.size + self._REPR_RESIDENT.size]))
@@ -130,19 +113,48 @@ class AttributeHeader():
 
     @classmethod
     def size(cls):
+        #TODO account for self.attr_name
         '''Return the header size'''
+        #TODO redo this. This is wrong by definition
         return cls._REPR.size
 
     def __len__(self):
-        '''Returns the logical size of the mft entry'''
-        self.len_attr
+        '''Returns the logical size of the attribute'''
+        return self.len_attr
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(attr_type_id={!s}, len_attr={}, nonresident_flag={!s}, name_len={}, name_offset={:#06x}, flags={!s}, attr_id={}, resident_header={}, non_resident_header={})'.format(
+        return self.__class__.__name__ + '(attr_type_id={!s}, len_attr={}, nonresident_flag={!s}, name_len={}, name_offset={:#06x}, flags={!s}, attr_id={}, resident_header={}, non_resident_header={}, attr_name={})'.format(
             self.attr_type_id, self.len_attr, self.nonresident_flag,
             self.name_len, self.name_offset, self.flags, self.attr_id,
-            self.resident_header, self.non_resident_header)
+            self.resident_header, self.non_resident_header, self.attr_name)
+
+class Attribute():
+    '''Represents an attribute, header and content. Independently the type of
+    attribute'''
+    def __init__(self, bin_view):
+        self.header = AttributeHeader(bin_view)
+        self.content = None
+
+        if self.header.nonresident_flag is AttrNonResident.NO:
+            offset = self.header.resident_header.content_offset
+            length = self.header.resident_header.content_len
+
+        if self.header.attr_type_id is AttrTypes.STANDARD_INFORMATION:
+            self.content = StandardInformation(bin_view[offset:offset+length])
+        elif self.header.attr_type_id is AttrTypes.FILE_NAME:
+            self.content = FileName(bin_view[offset:offset+length])
+        elif self.header.attr_type_id is AttrTypes.INDEX_ROOT:
+            self.content = IndexRoot(bin_view[offset:offset+length])
+
+
+    def __len__(self):
+        return len(self.header)
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return self.__class__.__name__ + '(header={}, attr_content={})'.format(
+            self.header, self.content)
 
 class MFTEntry():
     #has 1 MFTHeader
@@ -155,19 +167,25 @@ class MFTEntry():
         and the necessary attributes. This read exactly one entry.
         '''
         self.mft_header = None
+        self.attrs = {}
+
         bin_view = memoryview(bin_stream)
         attrs_view = None
 
-        self.mft_header = MFTHeader(bin_view[:MFTHeader.size()])
-        if len(bin_stream) != self.mft_header.mft_alloc_size:
-            #TODO error handling
-            print("EXPECTED MFT SIZE IS DIFFERENT THAN ENTRY SIZE. PROBLEM!")
-        self._apply_fixup_array(bin_view)
+        if bin_stream[0:4] != b"\x00\x00\x00\x00":
+            self.mft_header = MFTHeader(bin_view[:MFTHeader.size()])
+            if len(bin_stream) != self.mft_header.mft_alloc_size:
+                #TODO error handling
+                print("EXPECTED MFT SIZE IS DIFFERENT THAN ENTRY SIZE. PROBLEM!")
+            self._apply_fixup_array(bin_view)
 
-        attrs_view = bin_view[self.mft_header.first_attr_offset:]
-        print(self.mft_header)
-        #TODO have a "attribute parser" and a dispatcher?
-        self._load_attributes(attrs_view)
+            attrs_view = bin_view[self.mft_header.first_attr_offset:]
+            #TODO have a "attribute parser" and a dispatcher?
+            self._load_attributes(attrs_view)
+        else:
+            #TODO logging of the empty entry
+            #TODO error handling
+            self.attrs = None
 
         bin_view.release() #release the underlying buffer
 
@@ -203,22 +221,22 @@ class MFTEntry():
         while (attrs_view[offset:offset+4] != b'\xff\xff\xff\xff'):
             #pass all the information to the attr, as we don't know how
             #much content the attribute has
-            attr = AttributeHeader(attrs_view[offset:])
-            print(attr)
-            offset += attr.len_attr
+            attr = Attribute(attrs_view[offset:])
+            offset += len(attr)
+            if attr.header.attr_type_id not in self.attrs:
+                self.attrs[attr.header.attr_type_id] = []
+            self.attrs[attr.header.attr_type_id].append(attr)
 
+    def is_empty(self):
+        if self.mft_header is None and self.attrs is None:
+            return True
+        else:
+            return False
 
-
-        '''
-            attr_offset = mft_header.offset_first_attr
-            i = 0
-            while (bin_view[attr_offset:attr_offset+4] != b'0xffffffff'):
-                attr_offset += read_mft_attribute(bin_view, attr_offset).len_attr
-                if i > 2:
-                    break
-                else:
-                    i += 1
-        '''
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return self.__class__.__name__ + '(mft_header={}, attrs={})'.format(
+            self.mft_header, self.attrs)
 
 
 class MFT():
@@ -251,9 +269,22 @@ class MFT():
         for i in range(0, end):
             file_pointer.readinto(data_buffer)
             #TODO store this somewhere (list?)
-            MFTEntry(data_buffer)
-            break
-        print(file_pointer.tell())
+            entry = MFTEntry(data_buffer)
+            if not entry.is_empty():
+                #print(entry)
+                if AttrTypes.FILE_NAME in entry.attrs:
+                    print(entry.attrs[AttrTypes.FILE_NAME][0].content.name)
+                    if entry.attrs[AttrTypes.FILE_NAME][0].content.name == "folder1":
+                        print(entry)
+                    if entry.attrs[AttrTypes.FILE_NAME][0].content.name == "folder2":
+                        print(entry)
+                    if entry.attrs[AttrTypes.FILE_NAME][0].content.name == "filelevel1.txt":
+                        print(entry)
+                print([(key, len(value)) for key, value in entry.attrs.items()])
+                pass
+            #if i > 1:
+            #    break
+        #print(file_pointer.tell())
 
         #TODO multiprocessing, see below
         '''
@@ -273,6 +304,10 @@ class MFT():
         * Actually parallelize the access to the file, passing each thread their
          "limits", this might screw IO performance... badly...
         * Don't add multiprocessing and keep using a single buffer
+        **!!!!!
+         * Use two queues passing buffers, once processing is done, buffer
+         is inserted in another queue and the application waits for this queue
+         to have buffer enabled
 
         The managers shit:
             https://docs.python.org/3/library/multiprocessing.html?highlight=queue#multiprocessing-managers
