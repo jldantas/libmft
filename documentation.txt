@@ -1,0 +1,96 @@
+
+'''  ****MFT HEADER DOC******
+Fix up is elements are always 16 bits and the first is the signature
+
+Signature - 4 = FILE or BAAD or INDX
+Fix Up Array Pointer - 2
+Fix Up Count - 2
+Log file sequence # (LSN) - 8
+Sequence number - 2
+Hard Link count - 2
+Offset to the first attribute - 2
+Usage flags - 2 (0 - not in use, 1 - in use, 2 - directory, 3 - directory in use)
+MFT record logical size - 4
+MFT record physical size - 4
+Parent directory record # - 8
+Next attribute ID - 2 (xp only?)
+Padding  - 2 (xp only?)
+MFT record # - 4 (xp only?)
+'''
+
+''' ******ATTRIBUTE HEADER DOC********
+Attribute type id - 4
+Length of the attribute - 4
+non-resident flag - 1 (0 - resident, 1 - non-resident)
+length of the name - 1
+offset to name - 2
+flags - 2 (0x0001 - compressed, 0x4000 - encrypted, 0x8000 - sparse)
+attribute id - 2
+'''
+
+''' ******RESIDENT ATTRIBUTE HEADER DOC********
+Content length - 4
+Content offset - 2
+Indexed flag - 1
+Padding - 1
+'''
+
+''' ******NON RESIDENT ATTRIBUTE HEADER DOC********
+Start virtual cluster number - 8
+End virtual cluster number - 8
+Runlist offset - 2
+Compression unit size - 2
+Padding - 4
+Allocated size of the stream - 8
+Current size of the stream - 8
+Initialized size of the stream - 8
+'''
+
+''' ******FLAGS FOR STANDARD_INFORMATION AND FILE_NAME DOC********
+Read only - 0x0001
+Hidden - 0x0002
+System - 0x0004
+Archive - 0x0020
+Device - 0x0040
+Normal - 0x0080
+Temporary - 0x0100
+Sparse file - 0x0200
+Reparse point - 0x0400
+Compressed - 0x0800
+Offline - 0x1000
+Content not indexed for faster searches - 0x2000
+Encrypted - 0x4000
+'''
+
+''' ******STANDARD_INFORMATION ATTRIBUTE  DOC********
+creation time - 8
+file altered time - 8
+mft altered time - 8
+accessed time - 8
+flags - 4 (see FLAGS FOR STANDARD_INFORMATION AND FILE_NAME DOC)
+maximum number of versions - 4
+version number - 4
+class id - 4
+owner id - 4 (NTFS 3+)
+security id - 4 (NTFS 3+)
+quota charged - 8 (NTFS 3+)
+update sequence number - 8 (NTFS 3+)
+'''
+
+''' ******FILE_NAME ATTRIBUTE DOC********
+File reference to parent directory - 8
+creation time - 8
+file altered time - 8
+mft altered time - 8
+accessed time - 8
+allocated size of file - 8 (multiple of the cluster size)
+real size of file - 8 (actual file size, might also be stored by the directory)
+flags - 4 (see FLAGS FOR STANDARD_INFORMATION AND FILE_NAME DOC)
+name length - 1
+name type - 1
+  0 - POSIX - unicode, case sensitve
+  1 - Win32 - unicode, case insensitive
+  2 - DOS - 8.3 ASCII, case insensitive
+  3 - Win32 7 DOS (when Win32 fits in DOS space)
+name - variable
+'''
