@@ -5,7 +5,7 @@ import collections
 
 from util.functions import convert_filetime
 from mftres.attributes import AttrTypes, StandardInformation, StdInfoFlags, \
-    FileName, IndexRoot
+    FileName, IndexRoot, Data
 
 class MftSignature(enum.Enum):
     FILE = b"FILE"
@@ -144,9 +144,14 @@ class Attribute():
             self.content = StandardInformation(bin_view[offset:offset+length])
         elif self.header.attr_type_id is AttrTypes.FILE_NAME:
             self.content = FileName(bin_view[offset:offset+length])
+        elif self.header.attr_type_id is AttrTypes.DATA:
+            if self.header.nonresident_flag is AttrNonResident.NO:
+                self.content = Data.create_from_resident(bin_view[offset:offset+length])
+            else:
+                #TODO
+                pass
         elif self.header.attr_type_id is AttrTypes.INDEX_ROOT:
             self.content = IndexRoot(bin_view[offset:offset+length])
-
 
     def __len__(self):
         return len(self.header)
@@ -161,7 +166,8 @@ class MFTEntry():
     #has n attribute headers
     #has n attribute content
     #structure mft header -> attr header -> attr content -> attr header -> ...
-    def __init__(self, bin_stream):
+    #TODO test carefully how to find the correct index entry, specially with NTFS versions < 3
+    def __init__(self, bin_stream, entry_number):
         '''Expects a writeable array with support to memoryview. Normally
         this would be a bytearray type. Once it has that, it reads the MFT
         and the necessary attributes. This read exactly one entry.
@@ -174,6 +180,10 @@ class MFTEntry():
 
         if bin_stream[0:4] != b"\x00\x00\x00\x00":
             self.mft_header = MFTHeader(bin_view[:MFTHeader.size()])
+            if self.mft_header.mft_record != entry_number:
+                #TODO mft_record is something that showed up only in XP, maybe it is better to overwrite here? Needs testing
+                print("SOMETHING IS WRONG, SONNY. RECORD NUMBER DON'T MATCH")
+
             if len(bin_stream) != self.mft_header.mft_alloc_size:
                 #TODO error handling
                 print("EXPECTED MFT SIZE IS DIFFERENT THAN ENTRY SIZE. PROBLEM!")
@@ -202,9 +212,9 @@ class MFTEntry():
         index = 1
         position = (sector_size * index) - 2
         while (position <= self.mft_header.mft_alloc_size):
-            if bin_view[position:position+1].tobytes() == fx_array[:1].tobytes():
+            if bin_view[position:position+2].tobytes() == fx_array[:2].tobytes():
                 #the replaced part must always match the signature!
-                bin_view[position:position+1] = fx_array[index * 2:(index * 2) + 1]
+                bin_view[position:position+2] = fx_array[index * 2:(index * 2) + 2]
             else:
                 print("REPLACING WRONG PLACE, STOP MOTHERFUCKER!")
                 #TODO error handling
@@ -233,11 +243,34 @@ class MFTEntry():
         else:
             return False
 
+    def get_stream_size(self, name):
+        pass
+
+    def get_ads(self, ads_name):
+        pass
+
+    def get_file_size(self):
+        #TODO this is not a good name. change it.
+        #TODO get ADSs sizes as well
+        if AttrTypes.DATA in self.attrs:
+            return [(attr.header.attr_name, attr.content.size) for attr in self.attrs[AttrTypes.DATA]]
+        else:
+            #TODO error handling? what is the best way to comunicate that directories have no size
+            return 0
+            pass
+
+# class MftUsageFlags(enum.Enum):
+#     NOT_USED = 0x0000
+#     IN_USE = 0x0001
+#     DIRECTORY = 0x0002
+#     DIRECTORY_IN_USE = 0x0003
+#     UNKNOW = 0xFFFF
+
+
     def __repr__(self):
         'Return a nicely formatted representation string'
         return self.__class__.__name__ + '(mft_header={}, attrs={})'.format(
             self.mft_header, self.attrs)
-
 
 class MFT():
     '''This class represents a MFT file. It has a bunch of MFT entries
@@ -269,18 +302,23 @@ class MFT():
         for i in range(0, end):
             file_pointer.readinto(data_buffer)
             #TODO store this somewhere (list?)
-            entry = MFTEntry(data_buffer)
+            entry = MFTEntry(data_buffer, i)
             if not entry.is_empty():
                 #print(entry)
                 if AttrTypes.FILE_NAME in entry.attrs:
-                    print(entry.attrs[AttrTypes.FILE_NAME][0].content.name)
-                    if entry.attrs[AttrTypes.FILE_NAME][0].content.name == "folder1":
-                        print(entry)
+                    #print(entry.attrs[AttrTypes.FILE_NAME][0].content.name)
+                    # if entry.attrs[AttrTypes.FILE_NAME][0].content.name == "folder1":
+                    #     print(entry)
                     if entry.attrs[AttrTypes.FILE_NAME][0].content.name == "folder2":
-                        print(entry)
+                        print(entry.attrs[AttrTypes.FILE_NAME])
                     if entry.attrs[AttrTypes.FILE_NAME][0].content.name == "filelevel1.txt":
-                        print(entry)
-                print([(key, len(value)) for key, value in entry.attrs.items()])
+                        print(entry.get_file_size())
+                        print(entry.attrs[AttrTypes.DATA])
+                    pass
+                #print(entry)
+                #print(entry.mft_header.mft_record)
+                #print(i, [(key, len(value)) for key, value in entry.attrs.items()])
+                #break
                 pass
             #if i > 1:
             #    break

@@ -104,8 +104,6 @@ class FileName():
     _REPR = struct.Struct("7Q2I2B")
 
     def __init__(self, attr_view):
-        #print(attr_view[self._REPR.size:].tobytes().decode("utf_16_le"))
-        #print(attr_view[self._REPR.size:].tobytes())
         temp = self._REPR.unpack(attr_view[:self._REPR.size])
 
         self.timestamps = {}
@@ -141,6 +139,44 @@ class FileName():
             self.name)
 
 #******************************************************************************
+# DATA ATTRIBUTE
+#******************************************************************************
+class Data():
+    '''This is a placeholder class to the data attribute. By itself, it does
+    very little and holds almost no information. However, it holds the file size
+    parsed from the DATA attribute and, if the data is resident, holds the
+    content as well.
+    '''
+    def __init__(self, size, content=None):
+        '''Initialize the class. It is recommended that the class methods
+        "create_from_resident" or "create_from_nonresident" are used instead
+        of calling the creation directly. Expects the size of the data attribute,
+        in bytes, and the content, in case of a resident attribute
+        '''
+        self.size = size
+        self.content = content
+
+    @classmethod
+    def create_from_resident(cls, bin_view):
+        '''In case of a resident attribute, receives a binary_view of the content
+        with this information we derive the size.
+        '''
+        return cls(len(bin_view), bin_view.tobytes())
+
+    @classmethod
+    def create_from_nonresident(cls):
+        #TODO this part
+        pass
+
+    def __len__(self):
+        return self.size
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return self.__class__.__name__ + '(size={}, content={}'.format(
+            self.size, self.content)
+
+#******************************************************************************
 # INDEX_ROOT ATTRIBUTE
 #******************************************************************************
 class IndexRoot():
@@ -151,8 +187,6 @@ class IndexRoot():
     _REPR = struct.Struct("3IB3x")
 
     def __init__(self, attr_view):
-        #print(attr_view[self._REPR.size:].tobytes().decode("utf_16_le"))
-        #print(attr_view[self._REPR.size:].tobytes())
         temp = self._REPR.unpack(attr_view[:self._REPR.size])
 
         if temp[0]:
