@@ -37,6 +37,7 @@ Padding - 1
 '''
 
 ''' ******NON RESIDENT ATTRIBUTE HEADER DOC********
+https://github.com/libyal/libfsntfs/blob/master/documentation/New%20Technologies%20File%20System%20(NTFS).asciidoc#mft-entry-header
 Start virtual cluster number - 8
 End virtual cluster number - 8
 Runlist offset - 2

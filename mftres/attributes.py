@@ -1,7 +1,7 @@
 import enum
 import struct
 
-from util.functions import convert_filetime
+from util.functions import convert_filetime, get_file_reference
 
 class AttrTypes(enum.Enum):
     '''Define MFT attributes types.'''
@@ -17,7 +17,11 @@ class AttrTypes(enum.Enum):
     INDEX_ALLOCATION = 0xA0
     BITMAP = 0xB0
     REPARSE_POINT = 0xC0
+    EA_INFORMATION = 0xD0
+    EA = 0xE0
+    LOGGED_UTILITY_STREAM = 0x100   #NTFS < 3
     LOGGED_TOOL_STREAM = 0x100
+
 
 #******************************************************************************
 # STANDARD_INFORMATION ATTRIBUTE
@@ -107,9 +111,9 @@ class FileName():
         temp = self._REPR.unpack(attr_view[:self._REPR.size])
 
         self.timestamps = {}
-        #TODO REALLY DEBUG/TEST THIS ARITHIMETIC!!!!!!
-        self.parent_ref = (temp[0] & 0xffff000000000000) >> 48
-        self.parent_seq = temp[0] & 0x0000ffffffffffff
+        self.parent_ref, self.parent_seq = get_file_reference(temp[0])
+        #self.parent_ref = (temp[0] & 0xffff000000000000) >> 48
+        #self.parent_seq = temp[0] & 0x0000ffffffffffff
         self.timestamps["created"] = convert_filetime(temp[1])
         self.timestamps["changed"] = convert_filetime(temp[2])
         self.timestamps["mft_change"] = convert_filetime(temp[3])
@@ -164,9 +168,16 @@ class Data():
         return cls(len(bin_view), bin_view.tobytes())
 
     @classmethod
-    def create_from_nonresident(cls):
-        #TODO this part
-        pass
+    def create_from_nonresident(cls, bin_view, non_resident_header):
+        if non_resident_header.start_vcn:
+            #print(bin_view.tobytes())
+            #print(non_resident_header)
+            #print("not zero")
+            pass
+
+        #TODO temporary
+        return None
+
 
     def __len__(self):
         return self.size
