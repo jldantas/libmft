@@ -3,10 +3,10 @@ import struct
 import enum
 import collections
 
-from util.functions import convert_filetime
-from mftres.attributes import AttrTypes, StandardInformation, StdInfoFlags, \
-    FileName, IndexRoot, Data
-from mftres.headers import MftSignature, MftUsageFlags, MFTHeader, AttrNonResident, \
+from util.functions import convert_filetime, apply_fixup_array
+from mftres.attributes import AttrTypes, StandardInformation, FileInfoFlags, \
+    FileName, IndexRoot, Data, AttributeList
+from mftres.headers import MftSignature, MftUsageFlags, MFTHeader, \
     AttrFlags, ResidentAttrHeader, NonResidentAttrHeader, AttributeHeader
 
 class Attribute():
@@ -16,89 +16,78 @@ class Attribute():
         self.header = AttributeHeader(bin_view)
         self.content = None
 
-        if self.header.nonresident_flag is AttrNonResident.NO:
+        if not self.header.is_non_resident:
             offset = self.header.resident_header.content_offset
             length = self.header.resident_header.content_len
 
         if self.header.attr_type_id is AttrTypes.STANDARD_INFORMATION:
             self.content = StandardInformation(bin_view[offset:offset+length])
+        if self.header.attr_type_id is AttrTypes.ATTRIBUTE_LIST:
+            if not self.header.is_non_resident:
+                self.content = AttributeList(bin_view[offset:offset+length])
+            else:
+                self.content = AttributeList(None) #this case is much more a placeholer
+                #TODO maybe just putting None is better?
         elif self.header.attr_type_id is AttrTypes.FILE_NAME:
             self.content = FileName(bin_view[offset:offset+length])
         elif self.header.attr_type_id is AttrTypes.DATA:
-            if self.header.nonresident_flag is AttrNonResident.NO:
+            if not self.header.is_non_resident:
                 self.content = Data.create_from_resident(bin_view[offset:offset+length])
             else:
-                self.content = Data.create_from_nonresident(bin_view, self.header.non_resident_header)
+                self.content = Data.create_from_nonresident(self.header.non_resident_header)
         elif self.header.attr_type_id is AttrTypes.INDEX_ROOT:
             self.content = IndexRoot(bin_view[offset:offset+length])
+        else:
+            #TODO log/error when we don~t know how to treat an attribute
+            pass
 
     def __len__(self):
         return len(self.header)
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(header={}, attr_content={})'.format(
+        return self.__class__.__name__ + '(header={}, content={})'.format(
             self.header, self.content)
 
 class MFTEntry():
-    #has 1 MFTHeader
-    #has n attribute headers
-    #has n attribute content
-    #structure mft header -> attr header -> attr content -> attr header -> ...
+    '''Represent one MFT entry. This loads the necessary MFT headers, the
+    attributes and the MFT slack.
+    '''
     #TODO test carefully how to find the correct index entry, specially with NTFS versions < 3
     def __init__(self, bin_stream, entry_number):
         '''Expects a writeable array with support to memoryview. Normally
         this would be a bytearray type. Once it has that, it reads the MFT
-        and the necessary attributes. This read exactly one entry.
+        and the necessary attributes. This read exactly one entry. Also,
+        just to make sure the MFT entry number.
         '''
         self.mft_header = None
         self.attrs = {}
+        self.slack = None
 
         bin_view = memoryview(bin_stream)
         attrs_view = None
 
-        if bin_stream[0:4] != b"\x00\x00\x00\x00":
+        if bin_stream[0:4] != b"\x00\x00\x00\x00": #test if the entry is empty
             self.mft_header = MFTHeader(bin_view[:MFTHeader.size()])
             if self.mft_header.mft_record != entry_number:
                 #TODO mft_record is something that showed up only in XP, maybe it is better to overwrite here? Needs testing
-                print("SOMETHING IS WRONG, SONNY. RECORD NUMBER DON'T MATCH")
+                print("SOMETHING IS WRONG, SONNY. RECORD NUMBER DOESN'T MATCH")
 
             if len(bin_stream) != self.mft_header.mft_alloc_size:
                 #TODO error handling
                 print("EXPECTED MFT SIZE IS DIFFERENT THAN ENTRY SIZE. PROBLEM!")
-            self._apply_fixup_array(bin_view)
-
+            apply_fixup_array(bin_view, self.mft_header.fx_offset,
+                self.mft_header.fx_count, self.mft_header.mft_alloc_size)
             attrs_view = bin_view[self.mft_header.first_attr_offset:]
             #TODO have a "attribute parser" and a dispatcher?
             self._load_attributes(attrs_view)
+            self.slack = bin_view[self.mft_header.mft_size:].tobytes()
         else:
             #TODO logging of the empty entry
             #TODO error handling
             self.attrs = None
 
         bin_view.release() #release the underlying buffer
-
-    def _apply_fixup_array(self, bin_view):
-        '''This function reads the fixup array and apply the correct values
-        to the underlying binary stream. This function changes the entries
-        in memory.
-        '''
-        fx_array = bin_view[self.mft_header.fx_offset:self.mft_header.fx_offset+(2 * self.mft_header.fx_count)]
-        #the array is composed of the signature + substitutions, so fix that
-        fx_len = self.mft_header.fx_count - 1
-        #we can infer the sector size based on the size of the mft
-        sector_size = int(self.mft_header.mft_alloc_size / fx_len)
-        index = 1
-        position = (sector_size * index) - 2
-        while (position <= self.mft_header.mft_alloc_size):
-            if bin_view[position:position+2].tobytes() == fx_array[:2].tobytes():
-                #the replaced part must always match the signature!
-                bin_view[position:position+2] = fx_array[index * 2:(index * 2) + 2]
-            else:
-                print("REPLACING WRONG PLACE, STOP MOTHERFUCKER!")
-                #TODO error handling
-            index += 1
-            position = (sector_size * index) - 2
 
     def _load_attributes(self, attrs_view):
         '''This function receives a view that starts at the first attribute
@@ -141,6 +130,7 @@ class MFTEntry():
 
     def __repr__(self):
         'Return a nicely formatted representation string'
+        #TODO print the slack?
         return self.__class__.__name__ + '(mft_header={}, attrs={})'.format(
             self.mft_header, self.attrs)
 
@@ -177,20 +167,26 @@ class MFT():
             entry = MFTEntry(data_buffer, i)
             if not entry.is_empty():
                 #print(entry)
-                #if i == 109056:
-                # if i == 92924:
-                #     print(entry)
-                #     break
-                # if entry.mft_header.base_record_ref == 92924:
-                #     print(entry)
-                #     if not entry.attrs[AttrTypes.DATA][0].header.non_resident_header.start_vcn:
-                #         print("FOUND DAMMIT")
+                # if i == 109056:
+                if i == 115975:
+                    print(entry)
+                    #break
+                if entry.mft_header.base_record_ref == 115975:
+                    print(entry)
+                    #if not entry.attrs[AttrTypes.DATA][0].header.non_resident_header.start_vcn:
+                    #    print("FOUND DAMMIT")
 
+                # if AttrTypes.ATTRIBUTE_LIST in entry.attrs:
+                #     if entry.attrs[AttrTypes.ATTRIBUTE_LIST][0].content is not None:
+                #         b = [a for a in entry.attrs[AttrTypes.ATTRIBUTE_LIST][0].content if a.attr_type is AttrTypes.DATA]
+                #         if len(b) > 1:
+                #             print(entry.attrs[AttrTypes.ATTRIBUTE_LIST][0].content)
+                                #break
 
-                if AttrTypes.DATA in entry.attrs:
-                    if entry.attrs[AttrTypes.DATA][0].header.nonresident_flag is AttrNonResident.YES:
-                        if entry.attrs[AttrTypes.DATA][0].header.non_resident_header.start_vcn:
-                            print(entry)
+                # if AttrTypes.DATA in entry.attrs:
+                #     if entry.attrs[AttrTypes.DATA][0].header.nonresident_flag is AttrNonResident.YES:
+                #         if entry.attrs[AttrTypes.DATA][0].header.non_resident_header.start_vcn:
+                #             print(entry)
                             #break
 
                 # if AttrTypes.FILE_NAME in entry.attrs:
