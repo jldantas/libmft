@@ -63,6 +63,8 @@ class MFTEntry():
         self.mft_header = None
         self.attrs = {}
         self.slack = None
+        #as one mft entry can be spread across multiple entries, we add the entries here
+        self.related_entries = []
 
         bin_view = memoryview(bin_stream)
         attrs_view = None
@@ -86,8 +88,14 @@ class MFTEntry():
             #TODO logging of the empty entry
             #TODO error handling
             self.attrs = None
+            self.related_entries = None
 
         bin_view.release() #release the underlying buffer
+
+    def _add_attribute(self, attr):
+        if attr.header.attr_type_id not in self.attrs:
+            self.attrs[attr.header.attr_type_id] = []
+        self.attrs[attr.header.attr_type_id].append(attr)
 
     def _load_attributes(self, attrs_view):
         '''This function receives a view that starts at the first attribute
@@ -100,10 +108,16 @@ class MFTEntry():
             #pass all the information to the attr, as we don't know how
             #much content the attribute has
             attr = Attribute(attrs_view[offset:])
+            self._add_attribute(attr)
             offset += len(attr)
-            if attr.header.attr_type_id not in self.attrs:
-                self.attrs[attr.header.attr_type_id] = []
-            self.attrs[attr.header.attr_type_id].append(attr)
+
+    def add_related_entry(self, entry):
+        for key in entry.attrs:
+            for attr in entry.attrs[key]:
+                self._add_attribute(attr)
+            entry.attrs[key] = None
+        self.related_entries.append(entry)
+
 
     def is_empty(self):
         if self.mft_header is None and self.attrs is None:
@@ -117,16 +131,42 @@ class MFTEntry():
     def get_ads(self, ads_name):
         pass
 
+    def get_attributes(self, attr_type):
+        if attr_type in self.attrs:
+            return self.attrs[attr_type]
+        else:
+            return None
+
+    def get_standard_info(self):
+        '''This is a helper function that returns only the content of the
+        STANDARD_INFORMATION attribute. This will return a StandardInformation
+        instance'''
+        attrs = self.get_attributes(AttrTypes.STANDARD_INFORMATION)
+
+        if len(attrs) == 1:
+            return attrs[0].content
+        else:
+            #TODO error handling, no entry should have more than one STD INFO header, we have a problem
+            print("MULTIPLE STD INFO HEADERS. PROBLEM.")
+
+    def is_deleted(self):
+        if self.mft_header.usage_flags is MftUsageFlags.NOT_USED:
+            return True
+        else:
+            return False
+
     def get_file_size(self):
         #TODO this is not a good name. change it.
         #TODO get ADSs sizes as well
         if AttrTypes.DATA in self.attrs:
-            return [(attr.header.attr_name, attr.content.size) for attr in self.attrs[AttrTypes.DATA]]
+            ret = [(attr.header.attr_name, len(attr.content)) for attr in self.attrs[AttrTypes.DATA] if not (attr.header.attr_name is None and len(attr.content) == 0 and attr.content is None)]
+            if not ret:
+                ret = (None, 0)
         else:
             #TODO error handling? what is the best way to comunicate that directories have no size
-            return 0
-            pass
+            ret = (None, 0)
 
+        return ret
 
     def __repr__(self):
         'Return a nicely formatted representation string'
@@ -147,66 +187,44 @@ class MFT():
         it.
         '''
         self.mft_entry_size = size
+        self.entries = []
+        self.base_ref_control = {}
 
         data_buffer = 0
+        temporary_entry_holder = []
 
         if not self.mft_entry_size:
             self.mft_entry_size = self._find_mft_size(file_pointer)
-
         #TODO test and verify what happens with really big files? overflow?
         file_pointer.seek(0, 2)
         end = int(file_pointer.tell() / self.mft_entry_size)
         if (file_pointer.tell() % self.mft_entry_size):
-            #TODO possible error handling (file size not multiple of mft size)
+            #TODO error handling (file size not multiple of mft size)
             print("FILE SIZE NOT MULITPLE OF MFT ENTRY SIZE, POSSIBLE PROBLEM")
         file_pointer.seek(0, 0)
         data_buffer = bytearray(self.mft_entry_size)
         for i in range(0, end):
             file_pointer.readinto(data_buffer)
-            #TODO store this somewhere (list?)
             entry = MFTEntry(data_buffer, i)
             if not entry.is_empty():
-                #print(entry)
-                # if i == 109056:
-                if i == 115975:
-                    print(entry)
-                    #break
-                if entry.mft_header.base_record_ref == 115975:
-                    print(entry)
-                    #if not entry.attrs[AttrTypes.DATA][0].header.non_resident_header.start_vcn:
-                    #    print("FOUND DAMMIT")
+                if not entry.mft_header.base_record_ref:
+                    self.entries.append(entry)
+                else:
+                    base_record_ref = entry.mft_header.base_record_ref
+                    if entry.mft_header.base_record_ref < len(self.entries):
+                        self.entries[base_record_ref].add_related_entry(entry)
+                        #TODO this is not good practice, think about a way of storing
+                        #the same type of elements on the array
+                        self.entries.append(base_record_ref)
+                    else:
+                        temporary_entry_holder.append(entry)
+                        self.entries.append(base_record_ref)
+            else: #this should keep the entry id in sync with the index of the list
+                self.entries.append(None)
 
-                # if AttrTypes.ATTRIBUTE_LIST in entry.attrs:
-                #     if entry.attrs[AttrTypes.ATTRIBUTE_LIST][0].content is not None:
-                #         b = [a for a in entry.attrs[AttrTypes.ATTRIBUTE_LIST][0].content if a.attr_type is AttrTypes.DATA]
-                #         if len(b) > 1:
-                #             print(entry.attrs[AttrTypes.ATTRIBUTE_LIST][0].content)
-                                #break
-
-                # if AttrTypes.DATA in entry.attrs:
-                #     if entry.attrs[AttrTypes.DATA][0].header.nonresident_flag is AttrNonResident.YES:
-                #         if entry.attrs[AttrTypes.DATA][0].header.non_resident_header.start_vcn:
-                #             print(entry)
-                            #break
-
-                # if AttrTypes.FILE_NAME in entry.attrs:
-                #     print(entry.attrs[AttrTypes.FILE_NAME][0].content.name)
-                    # if entry.attrs[AttrTypes.FILE_NAME][0].content.name == "folder1":
-                    #     print(entry)
-                    # if entry.attrs[AttrTypes.FILE_NAME][0].content.name == "folder2":
-                    #     print(entry.attrs[AttrTypes.FILE_NAME])
-                    # if entry.attrs[AttrTypes.FILE_NAME][0].content.name == "filelevel1.txt":
-                    #     print(entry.get_file_size())
-                    #     print(entry.attrs[AttrTypes.DATA])
-                    # pass
-                #print(entry)
-                #print(entry.mft_header.mft_record)
-                #print(i, [(key, len(value)) for key, value in entry.attrs.items()])
-                #break
-                pass
-            #if i > 1:
-            #    break
-        #print(file_pointer.tell())
+        for entry in temporary_entry_holder:
+            base_record_ref = entry.mft_header.base_record_ref
+            self.entries[base_record_ref].add_related_entry(entry)
 
         #TODO multiprocessing, see below
         '''
@@ -229,12 +247,60 @@ class MFT():
         **!!!!!
          * Use two queues passing buffers, once processing is done, buffer
          is inserted in another queue and the application waits for this queue
-         to have buffer enabled
+         to have buffer available
 
         The managers shit:
             https://docs.python.org/3/library/multiprocessing.html?highlight=queue#multiprocessing-managers
             https://stackoverflow.com/questions/11196367/processing-single-file-from-multiple-processes-in-python
         '''
+
+    # def get_entry(self, entry_number):
+    #     entry = self.entries[entry_number]
+    #
+    #     if entry is not None:
+    #         try:
+    #             entry.mft_header
+    #         except ValueError:
+    #             entry = self.entries[entry]
+    #
+    #     return entry
+
+    def get_full_path(self, entry_number):
+        entry = self[entry_number]
+        names = []
+        root_id = 5
+        parent = 0
+
+        if entry is None:
+            #TODO better way of doing this? exception? empty string? None?
+            #I'm leaving empty string for now, so it is consistent (alwayes return string)
+            return ""
+
+        while parent != root_id:
+            attrs = entry.get_attributes(AttrTypes.FILE_NAME)
+            if attrs is None: #some un-named attribute, fire an exception?
+                #TODO exception or None?
+                return None
+            for attr in attrs:
+                parent = attr.content.parent_ref
+                names.append(attr.content.name)
+                entry = self[parent]
+
+        return "\\".join(reversed(names))
+
+    def __getitem__(self, index):
+        entry = self.entries[index]
+
+        if entry is not None:
+            try:
+                entry.mft_header
+            except AttributeError:
+                entry = self.entries[entry]
+
+        return entry
+
+    def __len__(self):
+        return len(self.entries)
 
     def _find_mft_size(self, file_object):
         sizes = [1024, 4096, 512, 2048]
