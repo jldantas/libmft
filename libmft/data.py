@@ -3,10 +3,10 @@ import struct
 import enum
 import collections
 
-from util.functions import convert_filetime, apply_fixup_array
-from mftres.attributes import AttrTypes, StandardInformation, FileInfoFlags, \
+from libmft.util.functions import convert_filetime, apply_fixup_array
+from libmft.attributes import AttrTypes, StandardInformation, FileInfoFlags, \
     FileName, IndexRoot, Data, AttributeList
-from mftres.headers import MftSignature, MftUsageFlags, MFTHeader, \
+from libmft.headers import MftSignature, MftUsageFlags, MFTHeader, \
     AttrFlags, ResidentAttrHeader, NonResidentAttrHeader, AttributeHeader
 
 class Attribute():

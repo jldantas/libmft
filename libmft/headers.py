@@ -2,8 +2,8 @@ import enum
 import struct
 import collections
 
-from mftres.attributes import AttrTypes
-from util.functions import get_file_reference
+from libmft.attributes import AttrTypes
+from libmft.util.functions import get_file_reference
 
 class MftSignature(enum.Enum):
     FILE = b"FILE"

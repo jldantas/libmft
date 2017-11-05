@@ -1,7 +1,7 @@
 import enum
 import struct
 
-from util.functions import convert_filetime, get_file_reference
+from libmft.util.functions import convert_filetime, get_file_reference
 
 class AttrTypes(enum.Enum):
     '''Define MFT attributes types.'''

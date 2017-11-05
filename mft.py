@@ -1,4 +1,4 @@
-import mftres.data
+import libmft.data
 
 test = "./mft_samples/MFT_singlefile.bin"
 #test = "./mft_samples/MFT_onefiledeleted.bin"
@@ -10,7 +10,7 @@ test = "./mft_samples/MFT_singlefile.bin"
 
 def main():
     with open(test, "rb") as mft_file:
-        mft = mftres.data.MFT(mft_file)
+        mft = libmft.data.MFT(mft_file)
 
     print(len(mft))
     #print(mft[115975].get_file_size())
