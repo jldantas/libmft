@@ -23,7 +23,8 @@ class AttrTypes(enum.Enum):
     LOGGED_TOOL_STREAM = 0x100
 
 class FileInfoFlags(enum.IntFlag):
-    '''Define the possible flags for the STANDARD_INFORMATION attribute'''
+    '''Define the possible flags for the STANDARD_INFORMATION and FILE_NAME
+    attributes'''
     READ_ONLY = 0x0001
     HIDDEN = 0x0002
     SYSTEM = 0x0004
@@ -169,7 +170,6 @@ class AttributeListEntry():
         self.file_ref, self.file_seq = get_file_reference(temp[5])
         self.attr_id = temp[6]
         if self.name_len:
-            #https://flatcap.org/linux-ntfs/ntfs/attributes/attribute_list.html
             self.name = entry_view[self.name_offset:self.name_offset+(2*self.name_len)].tobytes().decode("utf_16_le")
         else:
             self.name = None #TODO return None or empty?
