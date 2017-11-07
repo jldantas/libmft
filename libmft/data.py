@@ -34,14 +34,10 @@ class Attribute():
             elif self.header.attr_type_id is AttrTypes.INDEX_ROOT:
                 self.content = IndexRoot(bin_view[offset:offset+length])
             else:
-                #TODO log/error when we don~t know how to treat an attribute
+                #TODO log/error when we don't know how to treat an attribute
                 pass
         else:
             self.content = DataRuns(bin_view[self.header.non_resident_header.rl_offset:])
-
-
-        if self.header.attr_type_id is AttrTypes.ATTRIBUTE_LIST and self.header.is_non_resident:
-            print(self)
 
     def __len__(self):
         return len(self.header)
@@ -95,7 +91,7 @@ class MFTEntry():
         else:
             logging.debug(f"Entry {entry_number} is empty.")
             self.attrs = None
-            self._related_entries = None
+            #self._related_entries = None
 
         bin_view.release() #release the underlying buffer
 
@@ -120,12 +116,12 @@ class MFTEntry():
             self._add_attribute(attr)
             offset += len(attr)
 
-    def add_related_entry(self, entry):
-        # for key in entry.attrs:
-        #     for attr in entry.attrs[key]:
-        #         self._add_attribute(attr)
-        #     entry.attrs[key] = None
-        self._related_entries.append(entry)
+    # def add_related_entry(self, entry):
+    #     for key in entry.attrs:
+    #         for attr in entry.attrs[key]:
+    #             self._add_attribute(attr)
+    #         entry.attrs[key] = None
+    #     self._related_entries.append(entry)
 
 
     def is_empty(self):
@@ -148,17 +144,17 @@ class MFTEntry():
         else:
             return None
 
-    def get_standard_info(self):
-        '''This is a helper function that returns only the content of the
-        STANDARD_INFORMATION attribute. This will return a StandardInformation
-        instance'''
-        attrs = self.get_attributes(AttrTypes.STANDARD_INFORMATION)
-
-        if len(attrs) == 1:
-            return attrs[0].content
-        else:
-            #TODO error handling, no entry should have more than one STD INFO header, we have a problem
-            print("MULTIPLE STD INFO HEADERS. PROBLEM.")
+    # def get_standard_info(self):
+    #     '''This is a helper function that returns only the content of the
+    #     STANDARD_INFORMATION attribute. This will return a StandardInformation
+    #     instance'''
+    #     attrs = self.get_attributes(AttrTypes.STANDARD_INFORMATION)
+    #
+    #     if len(attrs) == 1:
+    #         return attrs[0].content
+    #     else:
+    #         #TODO error handling, no entry should have more than one STD INFO header, we have a problem
+    #         print("MULTIPLE STD INFO HEADERS. PROBLEM.")
 
     def is_deleted(self):
         if self.header.usage_flags is MftUsageFlags.NOT_USED:
@@ -199,10 +195,10 @@ class MFT():
         '''
         self.mft_entry_size = size
         self.entries = []
-        self.base_ref_control = {}
+        self.related_entries_nr = {}
 
         data_buffer = 0
-        temporary_entry_holder = []
+        temp_entry_n_attr_list_nr = []
 
         if not self.mft_entry_size:
             self.mft_entry_size = self._find_mft_size(file_pointer)
@@ -217,59 +213,40 @@ class MFT():
         for i in range(0, end):
             file_pointer.readinto(data_buffer)
             entry = MFTEntry(data_buffer, i)
+            #print(entry)
 
             if not entry.is_empty():
                 self.entries.append(entry)
+                #we have a problem. If the entry has a non-resident ATTRIBUTE_LIST,
+                #it is impossible to find the entries based on the base record.
+                #as such, in those cases, we cheat. Create a structure that allows
+                #this mapping
+                attr_list = entry.get_attributes(AttrTypes.ATTRIBUTE_LIST)
+                if attr_list is not None:
+                    if len(attr_list) == 1 and attr_list[0].header.is_non_resident:
+                        temp_entry_n_attr_list_nr.append(i)
+                    elif len(attr_list) > 1:
+                        #TODO error handling? is there a case of multiple attr lists?
+                        pass
             else:
                 self.entries.append(None)
 
-            # self.entries.append(entry)
-            # if not entry.is_empty():
-            #     if entry.header.base_record_ref:
-            #         print(entry.header.base_record_ref)
+        '''This logic is kind of strange. Once we find all the attributes
+        that have non-resident ATTRIBUTE_LIST, we iterate over all the entries
+        in search of those that have the parent as the ones mapped. Once we find
+        the base is add to the dictonary of related entries. This should, in theory
+        allow us to identify related entries.
+        '''
+        #TODO test if this works and/or is worth
+        for i, entry in enumerate(self.entries):
+            if entry is not None:
+                base_record_ref = entry.header.base_record_ref
+                if base_record_ref in temp_entry_n_attr_list_nr:
+                    if base_record_ref not in self.related_entries_nr:
+                        self.related_entries_nr[base_record_ref] = set()
+                    self.related_entries_nr[base_record_ref].add(i)
 
-            # if i == 171977 or i == 213989 or i == 274357:
-            #     print(entry)
-
-        #     if not entry.is_empty():
-        #         if not entry.header.base_record_ref:
-        #             self.entries.append(entry)
-        #         else:
-        #             self.base_ref_control[i] = entry.header.base_record_ref
-        #             self.entries.append(None)
-        #
-        #             if i == 171977 or i == 213989:
-        #                 print("ADDED AS TEMPORARY")
-        #
-        #             temporary_entry_holder.append(entry)
-        #     else:
-        #         self.entries.append(None)
-        #
-        # # print(temporary_entry_holder)
-        # for entry in temporary_entry_holder:
-        #     base_record_ref = entry.header.base_record_ref
-        #     # print(entry.header.mft_record, base_record_ref)
-        #     self.entries[base_record_ref].add_related_entry(entry)
-
-        #         base_record_ref = entry.header.base_record_ref
-        #         self.base_ref_control[i] = base_record_ref
-        #             self.entries
-        #
-        #
-        #             if base_record_ref < len(self.entries):
-        #                 self.entries[base_record_ref].add_related_entry(entry)
-        #                 #TODO this is not good practice, think about a way of storing
-        #                 #the same type of elements on the array
-        #                 self.entries.append(base_record_ref)
-        #             else:
-        #                 temporary_entry_holder.append(entry)
-        #                 self.entries.append(base_record_ref)
-        #     else: #this should keep the entry id in sync with the index of the list
-        #         self.entries.append(None)
-        #
-        # for entry in temporary_entry_holder:
-        #     base_record_ref = entry.header.base_record_ref
-        #     self.entries[base_record_ref].add_related_entry(entry)
+        #print(self.related_entries_nr)
 
         #TODO multiprocessing, see below
         '''
@@ -299,16 +276,14 @@ class MFT():
             https://stackoverflow.com/questions/11196367/processing-single-file-from-multiple-processes-in-python
         '''
 
-    # def get_entry(self, entry_number):
-    #     entry = self.entries[entry_number]
-    #
-    #     if entry is not None:
-    #         try:
-    #             entry.header
-    #         except ValueError:
-    #             entry = self.entries[entry]
-    #
-    #     return entry
+
+    def _find_base_entry(self, entry_number):
+        return_number = entry_number
+
+        while self[return_number].header.base_record_ref:
+            return_number = self[return_number].header.base_record_ref
+
+        return return_number
 
     def get_full_path(self, entry_number):
         entry = self[entry_number]
@@ -322,6 +297,7 @@ class MFT():
             return ""
 
         while parent != root_id:
+
             attrs = entry.get_attributes(AttrTypes.FILE_NAME)
             if attrs is None: #some un-named attribute, fire an exception?
                 #TODO exception or None?
@@ -334,15 +310,17 @@ class MFT():
         return "\\".join(reversed(names))
 
     def __getitem__(self, index):
+        '''Return the specific MFT entry. In case of an empty MFT, it will return
+        None'''
         entry = self.entries[index]
 
-        if entry is not None:
-            try:
-                entry.header
-            except AttributeError:
-                entry = self.entries[entry]
-
         return entry
+
+        # if entry is not None:
+        #     return entry
+        # else:
+        #     raise Exception
+        #     pass
 
     def __len__(self):
         return len(self.entries)

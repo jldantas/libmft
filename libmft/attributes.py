@@ -70,25 +70,53 @@ class DataRuns():
     _INFO = struct.Struct("<B")
 
     def __init__(self, runs_view):
-        self.data_runs = []
+        '''Parses and stores the data runs of a non-resident attribute. This can,
+        for all intents an purpose, the "content" of an attribute in the view of
+        MFT, even if the tru content is somewhere else on the disk.
+        The data run structure is stored in a list of tuples, where the first value
+        is the length of the data run and the second value is the absolute offset.
+
+        Great resource for explanation and tests:
+        https://flatcap.org/linux-ntfs/ntfs/concepts/data_runs.html
+        '''
+        self.data_runs = [] #lis of tuples
+        #TODO create a class for this?
 
         offset = 0
         previous_dr_offset = 0
         header_size = DataRuns._INFO.size #"header" of a data run is always a byte
 
-        while runs_view[offset] != 0:
+        while runs_view[offset] != 0:   #the runlist ends with an 0 as the "header"
             header = DataRuns._INFO.unpack(runs_view[offset:offset+header_size])[0]
             length_len = header & 0x0F
             length_offset = (header & 0xF0) >> 4
 
-            temp_len = offset+header_size+length_len
+            temp_len = offset+header_size+length_len #helper variable just to make things simpler
             dr_length = int.from_bytes(runs_view[offset+header_size:temp_len], "little", signed=False)
-            dr_offset = int.from_bytes(runs_view[temp_len:temp_len+length_offset], "little", signed=True) + previous_dr_offset
-            previous_dr_offset = dr_offset
+            if length_offset: #the offset is relative to the previous data run
+                dr_offset = int.from_bytes(runs_view[temp_len:temp_len+length_offset], "little", signed=True) + previous_dr_offset
+                previous_dr_offset = dr_offset
+            else: #if it is sparse, requires a a different approach
+                dr_offset = None
             offset += header_size + length_len + length_offset
             self.data_runs.append((dr_length, dr_offset))
 
+    def __len__(self):
+        '''Returns the number of data runs'''
+        return len(self.data_runs)
 
+    def __iter__(self):
+        '''Return the iterator for the representation of the list.'''
+        return iter(self.data_runs)
+
+    def __getitem__(self, index):
+        '''Return a specific data run'''
+        return self.data_runs[index]
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return self.__class__.__name__ + '(data_runs={})'.format(
+            self.data_runs)
 
 
 #******************************************************************************
