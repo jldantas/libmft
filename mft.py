@@ -1,11 +1,11 @@
 import libmft.data
 
-test = "./mft_samples/MFT_singlefile.bin"
+#test = "./mft_samples/MFT_singlefile.bin"
 #test = "./mft_samples/MFT_onefiledeleted.bin"
 #test = "./mft_samples/MFT_singlefileads.bin"
 #test = "./mft_samples/MFT_twofolderonefile.bin"
 #test = "C:/cases/full_sample.bin"
-#test = "C:/cases/my_mft.bin"
+test = "C:/cases/my_mft.bin"
 #test = "C:/Users/Julio/Downloads/MFT.bin"
 
 def main():

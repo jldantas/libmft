@@ -1,7 +1,20 @@
+'''
+This module contains all the known information about attributes. In particular,
+their content. By definition, as we have only the $MFT available for processing
+we can't have any of the content in case of non-resident attributes.
+That means that all the classes below EXPECT the attribute to be resident.
+
+Calling the constructors for a non-resident attribute MAY lead to an unxpected
+behaviour.
+'''
 import enum
 import struct
+import logging
 
 from libmft.util.functions import convert_filetime, get_file_reference
+from libmft.exceptions import AttrContentException
+
+MOD_LOGGER = logging.getLogger(__name__)
 
 class AttrTypes(enum.Enum):
     '''Define MFT attributes types.'''
@@ -50,19 +63,48 @@ class NameType(enum.Enum):
 #attributes as tuple or list and use properties to access by name
 
 #******************************************************************************
+# DATA_RUN
+#******************************************************************************
+#TODO is this the best place to put it?
+class DataRuns():
+    _INFO = struct.Struct("<B")
+
+    def __init__(self, runs_view):
+        self.data_runs = []
+
+        offset = 0
+        previous_dr_offset = 0
+        header_size = DataRuns._INFO.size #"header" of a data run is always a byte
+
+        while runs_view[offset] != 0:
+            header = DataRuns._INFO.unpack(runs_view[offset:offset+header_size])[0]
+            length_len = header & 0x0F
+            length_offset = (header & 0xF0) >> 4
+
+            temp_len = offset+header_size+length_len
+            dr_length = int.from_bytes(runs_view[offset+header_size:temp_len], "little", signed=False)
+            dr_offset = int.from_bytes(runs_view[temp_len:temp_len+length_offset], "little", signed=True) + previous_dr_offset
+            previous_dr_offset = dr_offset
+            offset += header_size + length_len + length_offset
+            self.data_runs.append((dr_length, dr_offset))
+
+
+
+
+#******************************************************************************
 # STANDARD_INFORMATION ATTRIBUTE
 #******************************************************************************
 class StandardInformation():
     '''Represents the STANDARD_INFORMATION converting the timestamps to
     datetimes and the flags to FileInfoFlags representation.
     '''
-    _REPR = struct.Struct("4Q6I2Q")
-    _REPR_NTFS_LE_3 = struct.Struct("4Q4I")
+    _REPR = struct.Struct("<4Q6I2Q")
+    _REPR_NTFS_LE_3 = struct.Struct("<4Q4I")
     ''' Creation time - 8
         File altered time - 8
         MFT/Metadata altered time - 8
         Accessed time - 8
-        Flags - 4
+        Flags - 4 (FileInfoFlags)
         Maximum number of versions - 4
         Version number - 4
         Class id - 4
@@ -77,13 +119,12 @@ class StandardInformation():
         correct size for this attribute. It accounts for versions of NTFS < 3 and
         NTFS > 3.
         '''
-        #TODO test instead of using try/catch? avoid a possible "double exception"
         try:
             temp = self._REPR.unpack(attr_view)
-            self.ntfs3_plus = True
+            ntfs3_plus = True
         except struct.error:
             temp = self._REPR_NTFS_LE_3.unpack(attr_view)
-            self.ntfs3_plus = False
+            ntfs3_plus = False
 
         self.timestamps = {}
         self.timestamps["created"] = convert_filetime(temp[0])
@@ -94,7 +135,7 @@ class StandardInformation():
         self.max_n_ver = temp[5]
         self.ver_n = temp[6]
         self.class_id = temp[7]
-        if (self.ntfs3_plus):
+        if (ntfs3_plus):
             self.owner_id = temp[8]
             self.security_id = temp[9]
             self.quota_charged = temp[10]
@@ -106,12 +147,10 @@ class StandardInformation():
             self.usn = None
 
     @classmethod
-    def size(cls, version3=True):
-        #TODO revisit this. Makes sense?
-        if version3:
-            return cls._REPR.size
-        else:
-            return cls._REPR_NTFS_LE_3.size
+    def get_content_size(cls):
+        '''Return the size of the STANDARD_INFORMATION content, always considering
+        a NFTS version >3.'''
+        return cls._REPR.size
 
     def get_created_time(self):
         '''Return the created time. This function provides the same information
@@ -144,11 +183,11 @@ class StandardInformation():
 #******************************************************************************
 class AttributeListEntry():
     '''This class holds one entry on the attribute list attribute.'''
-    _REPR = struct.Struct("IH2B2QH")
+    _REPR = struct.Struct("<IH2B2QH")
     '''
         Attribute type - 4
         Length of a particular entry - 2
-        Length of the name - 1
+        Length of the name - 1 (in characters)
         Offset to name - 1
         Starting VCN - 8
         File reference - 8
@@ -163,7 +202,7 @@ class AttributeListEntry():
         temp = self._REPR.unpack(entry_view[:self._REPR.size])
 
         self.attr_type = AttrTypes(temp[0])
-        self.entry_len = temp[1] #TODO normalize these names (len first, len after? etc)
+        self.entry_len = temp[1]
         self.name_len = temp[2]
         self.name_offset = temp[3]
         self.start_vcn = temp[4]
@@ -172,7 +211,11 @@ class AttributeListEntry():
         if self.name_len:
             self.name = entry_view[self.name_offset:self.name_offset+(2*self.name_len)].tobytes().decode("utf_16_le")
         else:
-            self.name = None #TODO return None or empty?
+            self.name = None
+
+    def __len__(self):
+        '''Returns the size of the entry, in bytes'''
+        return self.entry_len
 
     def __repr__(self):
         'Return a nicely formatted representation string'
@@ -187,22 +230,25 @@ class AttributeList():
         #TODO change from list to dict?
         self.attr_list = []
 
-        #we can only find the contents if the attribute is resident. If not,
-        #retun an empty list
-        #TODO change from empty to None?
-        if attr_view is not None:
-            offset = 0
-            while True:
-                entry = AttributeListEntry(attr_view[offset:])
-                offset += entry.entry_len
-                self.attr_list.append(entry)
-                if offset >= len(attr_view):
-                    break
+        offset = 0
+        while True:
+            entry = AttributeListEntry(attr_view[offset:])
+            offset += entry.entry_len
+            self.attr_list.append(entry)
+            if offset >= len(attr_view):
+                break
+
+    def __len__(self):
+        '''Return the number of entries in the attribute list'''
+        return len(self.attr_list)
 
     def __iter__(self):
         '''Return the iterator for the representation of the list, so it is
         easier to check everything'''
         return iter(self.attr_list)
+
+    def __getitem__(self, index):
+        return self.attr_list[index]
 
     def __repr__(self):
         'Return a nicely formatted representation string'
@@ -216,7 +262,7 @@ class FileName():
     '''Represents the FILE_NAME converting the timestamps to
     datetimes and the flags to FileInfoFlags representation.
     '''
-    _REPR = struct.Struct("7Q2I2B")
+    _REPR = struct.Struct("<7Q2I2B")
     ''' File reference to parent directory - 8
         Creation time - 8
         File altered time - 8
@@ -251,12 +297,8 @@ class FileName():
         self.name_type = NameType(temp[10])
         self.name = attr_view[self._REPR.size:].tobytes().decode("utf_16_le")
         if len(self.name) != self.name_len:
-            #TODO error handling
-            print("name size dont match. PROBLEM!")
-
-    @classmethod
-    def size(cls):
-        return cls._REPR.size
+            MOD_LOGGER.error("Expected file name size does not match.")
+            raise AttrContentException("Error processing FILE_NAME Attr. File name size does not match")
 
     def get_created_time(self):
         '''Return the created time. This function provides the same information
@@ -278,6 +320,12 @@ class FileName():
         as using <variable>.timestamps["accessed"]'''
         return self.timestamps["accessed"]
 
+    def __len__(self):
+        '''Returns the size of the file, in bytes, as recorded by the FILE_NAME
+        attribute. Be advised this can be wrong. The correct size should be parsed
+        from the data attribute. Blame Microsoft.'''
+        return self.file_size
+
     def __repr__(self):
         'Return a nicely formatted representation string'
         return self.__class__.__name__ + '(parent_ref={}, parent_seq={}, timestamps={}, allocated_file_size={}, file_size={}, flags={!s}, name_len={}, name_type={!s}, name={}'.format(
@@ -290,41 +338,16 @@ class FileName():
 #******************************************************************************
 class Data():
     '''This is a placeholder class to the data attribute. By itself, it does
-    very little and holds almost no information. However, it holds the file size
-    parsed from the DATA attribute and, if the data is resident, holds the
-    content as well.
+    very little and holds almost no information. If the data is resident, holds the
+    content and the size.
     '''
-    def __init__(self, size, size_on_disk, content=None):
-        '''Initialize the class. It is recommended that the class methods
-        "create_from_resident" or "create_from_nonresident" are used instead
-        of calling the creation directly. Expects the size of the data attribute,
-        in bytes, and the content, in case of a resident attribute
+    def __init__(self, bin_view):
+        '''Initialize the class. Expects the binary_view that represents the
+        content. Size information is derived from the content.
         '''
-        self.size = size
-        self.size_on_disk = size_on_disk
-        self.content = content
-
-    @classmethod
-    def create_from_resident(cls, bin_view):
-        '''In case of a resident attribute, receives a binary_view of the content
-        with this information we derive the size.
-        '''
-        return cls(len(bin_view), len(bin_view), bin_view.tobytes())
-
-    @classmethod
-    def create_from_nonresident(cls, non_resident_header):
-        '''In case of a non resident attribute. It makes no sense to receive the
-        binary content, but the size can be derived from the non resident header.
-        '''
-        if not non_resident_header.start_vcn:
-            #non resident data attributes have no content in the mft
-            return cls(non_resident_header.curr_sstream, non_resident_header.alloc_sstream)
-        else:
-            return cls(0, 0, None)
-            #TODO the size is stored on the data attribute with VCN 0 and is not
-            #maintained in any other data attribute of the same file. Need to
-            #check the best way to inform and process that
-            #TODO logging
+        self.size = len(bin_view)
+        self.size_on_disk = len(bin_view)
+        self.content = bin_view.tobytes()
 
     def __len__(self):
         '''Returns the logical size of the file'''
@@ -343,7 +366,7 @@ class IndexRoot():
     '''
     #name is missing, as encoding changes. It is added in the
     #initialization of the instance
-    _REPR = struct.Struct("3IB3x")
+    _REPR = struct.Struct("<3IB3x")
 
     def __init__(self, attr_view):
         temp = self._REPR.unpack(attr_view[:self._REPR.size])
