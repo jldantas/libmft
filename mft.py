@@ -5,14 +5,22 @@ import libmft.data
 #test = "./mft_samples/MFT_singlefileads.bin"
 #test = "./mft_samples/MFT_twofolderonefile.bin"
 #test = "C:/cases/full_sample.bin"
-#test = "C:/cases/my_mft.bin"
-test = "C:/Users/Julio/Downloads/MFT.bin"
+test = "C:/cases/my_mft.bin"
+#test = "C:/Users/Julio/Downloads/MFT.bin"
 
 def main():
     with open(test, "rb") as mft_file:
         mft = libmft.data.MFT(mft_file)
 
     print(len(mft))
+    #mft.get_full_path(38941)
+
+    #print(mft.get_full_path(15173))
+
+    for i, entry in enumerate(mft):
+        if entry is not None:
+            print(i, mft.get_full_path(i))
+
 
     #print(mft._find_base_entry(116004))
     # a = []

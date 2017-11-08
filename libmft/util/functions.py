@@ -1,4 +1,6 @@
 from datetime import datetime as _datetime, timedelta as _timedelta
+import itertools
+from collections import Iterable
 
 def convert_filetime(filetime):
     '''Convert FILETIME64 to datetime object'''
@@ -33,3 +35,7 @@ def apply_fixup_array(bin_view, fx_offset, fx_count, entry_size):
             #TODO error handling
         index += 1
         position = (sector_size * index) - 2
+
+def flatten(iterable):
+    '''Returns an iterable with the list flat'''
+    return itertools.chain.from_iterable(a if isinstance(a,Iterable) and not isinstance(a, str) else [a] for a in iterable)

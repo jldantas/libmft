@@ -2,8 +2,9 @@ import struct
 import enum
 import collections
 import logging
+import itertools
 
-from libmft.util.functions import convert_filetime, apply_fixup_array
+from libmft.util.functions import convert_filetime, apply_fixup_array, flatten
 from libmft.attributes import AttrTypes, StandardInformation, FileInfoFlags, \
     FileName, IndexRoot, Data, AttributeList, DataRuns
 from libmft.headers import MftSignature, MftUsageFlags, MFTHeader, \
@@ -65,8 +66,6 @@ class MFTEntry():
         self.header = None
         self.attrs = {}
         self.slack = None
-        #as one mft entry can be spread across multiple entries, we add the entries here
-        #self._related_entries = []
 
         bin_view = memoryview(bin_stream)
         attrs_view = None
@@ -91,7 +90,6 @@ class MFTEntry():
         else:
             logging.debug(f"Entry {entry_number} is empty.")
             self.attrs = None
-            #self._related_entries = None
 
         bin_view.release() #release the underlying buffer
 
@@ -116,12 +114,6 @@ class MFTEntry():
             self._add_attribute(attr)
             offset += len(attr)
 
-    # def add_related_entry(self, entry):
-    #     for key in entry.attrs:
-    #         for attr in entry.attrs[key]:
-    #             self._add_attribute(attr)
-    #         entry.attrs[key] = None
-    #     self._related_entries.append(entry)
 
 
     def is_empty(self):
@@ -137,12 +129,39 @@ class MFTEntry():
         pass
 
     def get_attributes(self, attr_type):
-        # temp = [r_entry.attrs[attr_type] for r_entry in self._related_entries if attr_type in r_entry.attrs]
-        # print(temp)
+        '''Returns a list with one or more attributes of type "attr_type", in
+        case they exist, otherwise, returns None. The attr_type must be a AttrTypes enum.'''
         if attr_type in self.attrs:
             return self.attrs[attr_type]
         else:
             return None
+
+    def find_related_records(self, attr_type):
+        #TODO Change function name
+        #TODO change commentary
+        '''Finds all the entries that have a specific attribute by interpreting the
+        information in the ATTRIBUTE_LIST attribute. This assumes that the infomation
+        is resident and available.'''
+
+        if self.header.base_record_ref:
+            #TODO is this true?
+            raise MFTEntryException("Only parent entries have an attribute list", self.header.mft_record)
+
+        attr_list = self.get_attributes(AttrTypes.ATTRIBUTE_LIST)
+        if attr_list is not None:
+            if len(attr_list) == 1:
+                attr = attr_list[0]
+                if not attr.header.is_non_resident:
+                    return [attr_list_entry.file_ref for attr_list_entry in attr.content if attr_list_entry.attr_type is attr_type]
+                else:
+                    #TODO exception or return?
+                    raise MFTEntryException("ATTRIBUTE_LIST is non-resident!", self.header.mft_record)
+            else:
+                #TODO is this true? Entries can have only 1 ATTRIBUTE_LIST?
+                raise MFTEntryException("More than 1 ATTRIBUTE_LIST!", self.header.mft_record)
+        else:
+            return None
+            #raise MFTEntryException("Only parent entries have an attribute list", self.header.mft_record)
 
     # def get_standard_info(self):
     #     '''This is a helper function that returns only the content of the
@@ -217,6 +236,18 @@ class MFT():
 
             if not entry.is_empty():
                 self.entries.append(entry)
+
+                # if entry.get_attributes(AttrTypes.ATTRIBUTE_LIST):
+                #     temp = entry.get_attributes(AttrTypes.ATTRIBUTE_LIST)[0]
+                #     #print(temp)
+                #     if not temp.header.is_non_resident:
+                #         for attr_list_e in temp.content:
+                #             #print(attr_list_e)
+                #             if attr_list_e.attr_type is AttrTypes.FILE_NAME and attr_list_e.file_ref != i:
+                #                 print(entry)
+                #                 print(entry.find_related_records(AttrTypes.FILE_NAME))
+                #                 raise Exception("Debug")
+
                 #we have a problem. If the entry has a non-resident ATTRIBUTE_LIST,
                 #it is impossible to find the entries based on the base record.
                 #as such, in those cases, we cheat. Create a structure that allows
@@ -285,27 +316,71 @@ class MFT():
 
         return return_number
 
+    def _get_related_entries(self, entry_number, attr_type=None):
+        #TODO test if entry referenced by entry_number is None?
+        parent_entry_number = self._find_base_entry(entry_number)
+        data = []
+
+        if parent_entry_number in self.related_entries_nr:
+            data.append(self.related_entries_nr[parent_entry_number])
+
+        if attr_type is not None:
+            entry = self[parent_entry_number]
+            try:
+                related_rec = entry.find_related_records(attr_type)
+                if related_rec is not None:
+                    data.append(related_rec)
+            except MFTEntryException as e:
+                MOD_LOGGER.exception("Data not found?")
+
+        return data
+
     def get_full_path(self, entry_number):
-        entry = self[entry_number]
+        #TODO ADS
+        curr_entry_number = entry_number
         names = []
+        temp_name = ""
+        temp_attr = None
         root_id = 5
         parent = 0
 
-        if entry is None:
+        if self[entry_number] is None:
             #TODO better way of doing this? exception? empty string? None?
             #I'm leaving empty string for now, so it is consistent (alwayes return string)
             return ""
+        #entry = self._find_base_entry(entry_number)
 
         while parent != root_id:
+            fn_entries = []
 
-            attrs = entry.get_attributes(AttrTypes.FILE_NAME)
-            if attrs is None: #some un-named attribute, fire an exception?
-                #TODO exception or None?
-                return None
-            for attr in attrs:
-                parent = attr.content.parent_ref
-                names.append(attr.content.name)
-                entry = self[parent]
+            numbers = self._get_related_entries(curr_entry_number, AttrTypes.FILE_NAME)
+            numbers.append(curr_entry_number)
+            #print(numbers)
+            for number in flatten(numbers):
+                entry  = self[number].get_attributes(AttrTypes.FILE_NAME)
+                if entry is not None:
+                    fn_entries.append(self[number].get_attributes(AttrTypes.FILE_NAME))
+
+            #print(self[12])
+            #print("FNENTRIES", fn_entries, entry_number)
+
+            if fn_entries:
+                for attr in itertools.chain.from_iterable(fn_entries):
+                    #print(attr)
+                    if attr.content.name_len > len(temp_name):
+                        temp_attr = attr
+                        temp_name = attr.content.name
+
+                #print(temp_attr)
+                parent = temp_attr.content.parent_ref
+                #print(curr_entry_number, parent, temp_attr.content.parent_ref)
+                curr_entry_number = parent
+                names.append(temp_name)
+                temp_name = ""
+            else: #some files just don't have a file name attribute
+                #TODO throw an exception?
+                #TODO logging
+                return ""
 
         return "\\".join(reversed(names))
 
