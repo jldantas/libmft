@@ -31,7 +31,7 @@ Python >= 3.6
 - [ ] SECURITY_DESCRIPTOR
 - [ ] VOLUME_NAME
 - [ ] VOLUME_INFORMATION
-- [ ] DATA
+- [x] DATA
 - [ ] INDEX_ROOT
 - [ ] INDEX_ALLOCATION
 - [ ] BITMAP
@@ -39,6 +39,10 @@ Python >= 3.6
 - [ ] EA_INFORMATION
 - [ ] EA
 - [ ] LOGGED_TOOL_STREAM
+
+## CHANGELOG
+
+
 
 ## References:
 

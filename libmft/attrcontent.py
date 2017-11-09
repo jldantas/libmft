@@ -13,111 +13,12 @@ import logging
 
 from libmft.util.functions import convert_filetime, get_file_reference
 from libmft.exceptions import AttrContentException
+from libmft.flagsandtypes import AttrTypes, NameType, FileInfoFlags
 
 MOD_LOGGER = logging.getLogger(__name__)
 
-class AttrTypes(enum.Enum):
-    '''Define MFT attributes types.'''
-    STANDARD_INFORMATION = 0x10
-    ATTRIBUTE_LIST = 0x20
-    FILE_NAME = 0x30
-    OBJECT_ID = 0X40
-    SECURITY_DESCRIPTOR = 0x50
-    VOLUME_NAME = 0x60
-    VOLUME_INFORMATION = 0x70
-    DATA = 0x80
-    INDEX_ROOT = 0x90
-    INDEX_ALLOCATION = 0xA0
-    BITMAP = 0xB0
-    REPARSE_POINT = 0xC0
-    EA_INFORMATION = 0xD0
-    EA = 0xE0
-    #LOGGED_UTILITY_STREAM = 0x100   #NTFS < 3
-    LOGGED_TOOL_STREAM = 0x100
-
-class FileInfoFlags(enum.IntFlag):
-    '''Define the possible flags for the STANDARD_INFORMATION and FILE_NAME
-    attributes'''
-    READ_ONLY = 0x0001
-    HIDDEN = 0x0002
-    SYSTEM = 0x0004
-    ARCHIVE = 0x0020
-    DEVICE = 0x0040
-    NORMAL = 0x0080
-    TEMPORARY = 0x0100
-    SPARSE_FILE = 0x0200
-    REPARSE_POINT = 0x0400
-    COMPRESSED = 0x0800
-    OFFLINE = 0x1000
-    CONTENT_NOT_INDEXED = 0x2000
-    ENCRYPTED = 0x4000
-
-class NameType(enum.Enum):
-    '''Flags that define how the file name is encoded in the FILE_NAME attribute'''
-    POSIX = 0x0 #unicode, case sensitive
-    WIN32 = 0x1 #unicode, case insensitive
-    DOS = 0x2 #8.3 ASCII, case insensitive
-    WIN32_DOS = 0X3 #Win32 fits dos space
-
 #TODO verify, in general, if it is not better to encode the data within the
 #attributes as tuple or list and use properties to access by name
-
-#******************************************************************************
-# DATA_RUN
-#******************************************************************************
-#TODO is this the best place to put it?
-class DataRuns():
-    _INFO = struct.Struct("<B")
-
-    def __init__(self, runs_view):
-        '''Parses and stores the data runs of a non-resident attribute. This can,
-        for all intents an purpose, the "content" of an attribute in the view of
-        MFT, even if the tru content is somewhere else on the disk.
-        The data run structure is stored in a list of tuples, where the first value
-        is the length of the data run and the second value is the absolute offset.
-
-        Great resource for explanation and tests:
-        https://flatcap.org/linux-ntfs/ntfs/concepts/data_runs.html
-        '''
-        self.data_runs = [] #lis of tuples
-        #TODO create a class for this?
-
-        offset = 0
-        previous_dr_offset = 0
-        header_size = DataRuns._INFO.size #"header" of a data run is always a byte
-
-        while runs_view[offset] != 0:   #the runlist ends with an 0 as the "header"
-            header = DataRuns._INFO.unpack(runs_view[offset:offset+header_size])[0]
-            length_len = header & 0x0F
-            length_offset = (header & 0xF0) >> 4
-
-            temp_len = offset+header_size+length_len #helper variable just to make things simpler
-            dr_length = int.from_bytes(runs_view[offset+header_size:temp_len], "little", signed=False)
-            if length_offset: #the offset is relative to the previous data run
-                dr_offset = int.from_bytes(runs_view[temp_len:temp_len+length_offset], "little", signed=True) + previous_dr_offset
-                previous_dr_offset = dr_offset
-            else: #if it is sparse, requires a a different approach
-                dr_offset = None
-            offset += header_size + length_len + length_offset
-            self.data_runs.append((dr_length, dr_offset))
-
-    def __len__(self):
-        '''Returns the number of data runs'''
-        return len(self.data_runs)
-
-    def __iter__(self):
-        '''Return the iterator for the representation of the list.'''
-        return iter(self.data_runs)
-
-    def __getitem__(self, index):
-        '''Return a specific data run'''
-        return self.data_runs[index]
-
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(data_runs={})'.format(
-            self.data_runs)
-
 
 #******************************************************************************
 # STANDARD_INFORMATION ATTRIBUTE

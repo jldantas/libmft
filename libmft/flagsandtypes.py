@@ -1,0 +1,78 @@
+''' This module holds all flags and types as defined by the library.
+This way, we have consistent means of finding this information. (Hopefully)
+'''
+import enum
+
+#******************************************************************************
+# Types
+#******************************************************************************
+class MftSignature(enum.Enum):
+    '''Identifies the possible types of MFT entries. Mainly used by
+    the MFTHeader, signature
+    '''
+    FILE = b"FILE"
+    BAAD = b"BAAD"
+    INDX = b"INDX"
+
+class AttrTypes(enum.Enum):
+    '''Defines the possible MFT attributes types.'''
+    STANDARD_INFORMATION = 0x10
+    ATTRIBUTE_LIST = 0x20
+    FILE_NAME = 0x30
+    OBJECT_ID = 0X40
+    SECURITY_DESCRIPTOR = 0x50
+    VOLUME_NAME = 0x60
+    VOLUME_INFORMATION = 0x70
+    DATA = 0x80
+    INDEX_ROOT = 0x90
+    INDEX_ALLOCATION = 0xA0
+    BITMAP = 0xB0
+    REPARSE_POINT = 0xC0
+    EA_INFORMATION = 0xD0
+    EA = 0xE0
+    #LOGGED_UTILITY_STREAM = 0x100   #NTFS < 3
+    LOGGED_TOOL_STREAM = 0x100
+
+class NameType(enum.Enum):
+    '''Flags that define how the file name is encoded in the FILE_NAME attribute'''
+    POSIX = 0x0 #unicode, case sensitive
+    WIN32 = 0x1 #unicode, case insensitive
+    DOS = 0x2 #8.3 ASCII, case insensitive
+    WIN32_DOS = 0X3 #Win32 fits dos space
+
+#******************************************************************************
+# Flags
+#******************************************************************************
+class FileInfoFlags(enum.IntFlag):
+    '''Define the possible flags for the STANDARD_INFORMATION and FILE_NAME
+    attributes'''
+    READ_ONLY = 0x0001
+    HIDDEN = 0x0002
+    SYSTEM = 0x0004
+    ARCHIVE = 0x0020
+    DEVICE = 0x0040
+    NORMAL = 0x0080
+    TEMPORARY = 0x0100
+    SPARSE_FILE = 0x0200
+    REPARSE_POINT = 0x0400
+    COMPRESSED = 0x0800
+    OFFLINE = 0x1000
+    CONTENT_NOT_INDEXED = 0x2000
+    ENCRYPTED = 0x4000
+
+class MftUsageFlags(enum.Enum):
+    '''Identifies the possible uses of a MFT entry. If it is not
+    used, a file or a directory. Mainly used be the MFTHeader, usage_flags
+    '''
+    NOT_USED = 0x0000
+    IN_USE = 0x0001
+    DIRECTORY = 0x0002
+    DIRECTORY_IN_USE = 0x0003
+    UNKNOW = 0xFFFF
+
+class AttrFlags(enum.Enum):
+    '''Represents the possible flags for the AttributeHeader class.'''
+    NORMAL = 0x0000
+    COMPRESSED = 0x0001
+    ENCRYPTED = 0x4000
+    SPARSE = 0x8000

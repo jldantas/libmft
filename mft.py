@@ -1,7 +1,8 @@
-import libmft.data
+import libmft.api
 
 #test = "./mft_samples/MFT_singlefile.bin"
 #test = "./mft_samples/MFT_onefiledeleted.bin"
+#test = "./mft_samples/MFT_changed.bin"
 #test = "./mft_samples/MFT_singlefileads.bin"
 #test = "./mft_samples/MFT_twofolderonefile.bin"
 #test = "C:/cases/full_sample.bin"
@@ -10,16 +11,26 @@ test = "C:/cases/my_mft.bin"
 
 def main():
     with open(test, "rb") as mft_file:
-        mft = libmft.data.MFT(mft_file)
+        mft = libmft.api.MFT(mft_file)
 
     print(len(mft))
     #mft.get_full_path(38941)
 
     #print(mft.get_full_path(15173))
 
-    for i, entry in enumerate(mft):
-        if entry is not None:
-            print(i, mft.get_full_path(i))
+    # for i, entry in enumerate(mft):
+    #     #if entry is not None and entry.is_deleted():
+    #     if entry is not None:
+    #         print(i, entry.is_deleted(), mft.get_full_path(i))
+
+    print(mft[166300])
+    print()
+    print(mft[165669])
+
+            # for attr in entry.attrs.values():
+            #     for a in attr:
+            #         if a.is_non_resident():
+            #             print(a)
 
 
     #print(mft._find_base_entry(116004))

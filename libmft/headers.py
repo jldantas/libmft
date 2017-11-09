@@ -1,38 +1,17 @@
+'''
+This module contains the definitions for all the headers when interpreting the
+MFT.
+'''
 import enum
 import struct
 import collections
 import logging
 
-from libmft.attributes import AttrTypes
+from libmft.flagsandtypes import AttrTypes, MftSignature, AttrFlags, MftUsageFlags
 from libmft.util.functions import get_file_reference
 from libmft.exceptions import MFTHeaderException, AttrHeaderException
 
 MOD_LOGGER = logging.getLogger(__name__)
-
-class MftSignature(enum.Enum):
-    '''This Enum identifies the possible types of MFT entries. Mainly used by
-    the MFTHeader, signature
-    '''
-    FILE = b"FILE"
-    BAAD = b"BAAD"
-    INDX = b"INDX"
-
-class MftUsageFlags(enum.Enum):
-    '''This Enum identifies the possible uses of a MFT entry. If it is not
-    used, a file or a directory. Mainly used be the MFTHeader, usage_flags
-    '''
-    NOT_USED = 0x0000
-    IN_USE = 0x0001
-    DIRECTORY = 0x0002
-    DIRECTORY_IN_USE = 0x0003
-    UNKNOW = 0xFFFF
-
-class AttrFlags(enum.Enum):
-    '''Represents the possible flags for the AttributeHeader class.'''
-    NORMAL = 0x0000
-    COMPRESSED = 0x0001
-    ENCRYPTED = 0x4000
-    SPARSE = 0x8000
 
 #TODO evaluate if converting a bunch of stuff to ctypes is a good idea
 
@@ -109,9 +88,106 @@ class MFTHeader():
 ResidentAttrHeader = collections.namedtuple("ResidentAttrHeader",
     ["content_len", "content_offset", "indexed_flag"])
 
-NonResidentAttrHeader = collections.namedtuple("NonResidentAttrHeader",
-    ["start_vcn", "end_vcn", "rl_offset", "compress_usize",
-    "alloc_sstream", "curr_sstream", "init_sstream"])
+#******************************************************************************
+# DATA_RUN
+#******************************************************************************
+# Data runs are part of the non resident header.
+class DataRuns():
+    _INFO = struct.Struct("<B")
+
+    def __init__(self, runs_view):
+        '''Parses and stores the data runs of a non-resident attribute. This can,
+        for all intents an purpose, the "content" of an attribute in the view of
+        MFT, even if the tru content is somewhere else on the disk.
+        The data run structure is stored in a list of tuples, where the first value
+        is the length of the data run and the second value is the absolute offset.
+
+        Great resource for explanation and tests:
+        https://flatcap.org/linux-ntfs/ntfs/concepts/data_runs.html
+        '''
+        self.data_runs = [] #lis of tuples
+        #TODO create a class for this?
+
+        offset = 0
+        previous_dr_offset = 0
+        header_size = DataRuns._INFO.size #"header" of a data run is always a byte
+
+        while runs_view[offset] != 0:   #the runlist ends with an 0 as the "header"
+            header = DataRuns._INFO.unpack(runs_view[offset:offset+header_size])[0]
+            length_len = header & 0x0F
+            length_offset = (header & 0xF0) >> 4
+
+            temp_len = offset+header_size+length_len #helper variable just to make things simpler
+            dr_length = int.from_bytes(runs_view[offset+header_size:temp_len], "little", signed=False)
+            if length_offset: #the offset is relative to the previous data run
+                dr_offset = int.from_bytes(runs_view[temp_len:temp_len+length_offset], "little", signed=True) + previous_dr_offset
+                previous_dr_offset = dr_offset
+            else: #if it is sparse, requires a a different approach
+                dr_offset = None
+            offset += header_size + length_len + length_offset
+            self.data_runs.append((dr_length, dr_offset))
+
+    def __len__(self):
+        '''Returns the number of data runs'''
+        return len(self.data_runs)
+
+    def __iter__(self):
+        '''Return the iterator for the representation of the list.'''
+        return iter(self.data_runs)
+
+    def __getitem__(self, index):
+        '''Return a specific data run'''
+        return self.data_runs[index]
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return self.__class__.__name__ + '(data_runs={})'.format(
+            self.data_runs)
+
+class NonResidentAttrHeader():
+    '''Represents the non-resident header of an attribute.'''
+    _REPR = struct.Struct("<2Q2H4x3Q")
+    ''' Start virtual cluster number - 8
+        End virtual cluster number - 8
+        Runlist offset - 2
+        Compression unit size - 2
+        Padding - 4
+        Allocated size of the stream - 8
+        Current size of the stream - 8
+        Initialized size of the stream - 8
+        Data runs - dynamic
+    '''
+
+    def __init__(self, header_view, non_resident_offset):
+        '''Creates a NonResidentAttrHeader object. header_view is a memoryview
+        starting at the beginning of the attribute and the non_resident_offset is
+        the size of the AttributeHeader, pointing to where the non resident
+        header starts'''
+        temp = self._REPR.unpack(header_view[non_resident_offset:non_resident_offset+NonResidentAttrHeader._REPR.size])
+
+        self.start_vcn = temp[0]
+        self.end_vcn = temp[1]
+        self.rl_offset = temp[2]
+        self.compress_usize = temp[3]
+        self.alloc_sstream = temp[4]
+        self.curr_sstream = temp[5]
+        self.init_sstream = temp[6]
+        self.data_runs = DataRuns(header_view[self.rl_offset:])
+
+    @classmethod
+    def get_header_size(cls):
+        '''Return the header size, does not account for the number of data runs'''
+        return cls._REPR.size
+
+    def __len__(self):
+        '''Returns the logical size of the mft entry'''
+        self.entry_len
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return self.__class__.__name__ + '(start_vcn={}, end_vcn={}, rl_offset={}, compress_usize={}, alloc_sstream={}, curr_sstream={}, init_sstream={}, data_runs={!s})'.format(
+            self.start_vcn, self.end_vcn, self.rl_offset, self.compress_usize, self.alloc_sstream,
+            self.curr_sstream, self.init_sstream, self.data_runs)
 
 class AttributeHeader():
     '''Represents the Attribute Header present in all attributes. Also accounts
@@ -132,17 +208,7 @@ class AttributeHeader():
         Indexed flag - 1
         Padding - 1
     '''
-    #TODO dataruns
-    _REPR_NONRESIDENT = struct.Struct("<2Q2H4x3Q")
-    ''' Start virtual cluster number - 8
-        End virtual cluster number - 8
-        Runlist offset - 2
-        Compression unit size - 2
-        Padding - 4
-        Allocated size of the stream - 8
-        Current size of the stream - 8
-        Initialized size of the stream - 8
-    '''
+
     _ALWAYS_RESIDENT = [AttrTypes.STANDARD_INFORMATION, AttrTypes.FILE_NAME,
         AttrTypes.INDEX_ROOT]
 
@@ -173,7 +239,7 @@ class AttributeHeader():
         if not self.is_non_resident:
             self.resident_header = ResidentAttrHeader._make(self._REPR_RESIDENT.unpack(header_view[self._REPR.size:self._REPR.size + self._REPR_RESIDENT.size]))
         else:
-            self.non_resident_header = NonResidentAttrHeader._make(self._REPR_NONRESIDENT.unpack(header_view[self._REPR.size:self._REPR.size+self._REPR_NONRESIDENT.size]))
+            self.non_resident_header = NonResidentAttrHeader(header_view, self._REPR.size)
 
     @classmethod
     def get_base_header_size(cls):

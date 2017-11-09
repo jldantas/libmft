@@ -5,10 +5,11 @@ import logging
 import itertools
 
 from libmft.util.functions import convert_filetime, apply_fixup_array, flatten
-from libmft.attributes import AttrTypes, StandardInformation, FileInfoFlags, \
-    FileName, IndexRoot, Data, AttributeList, DataRuns
-from libmft.headers import MftSignature, MftUsageFlags, MFTHeader, \
-    AttrFlags, ResidentAttrHeader, NonResidentAttrHeader, AttributeHeader
+from libmft.flagsandtypes import MftSignature, AttrTypes, MftUsageFlags
+from libmft.attrcontent import StandardInformation, FileName, IndexRoot, Data, \
+    AttributeList
+from libmft.headers import MFTHeader, ResidentAttrHeader, NonResidentAttrHeader,  \
+    AttributeHeader, DataRuns
 from libmft.exceptions import MFTEntryException
 
 MOD_LOGGER = logging.getLogger(__name__)
@@ -18,7 +19,7 @@ class Attribute():
     attribute'''
     def __init__(self, bin_view):
         self.header = AttributeHeader(bin_view)
-        self.content = None
+        self.content = None #content will be available only if the attribute is resident
 
         if not self.header.is_non_resident:
             offset = self.header.resident_header.content_offset
@@ -38,7 +39,12 @@ class Attribute():
                 #TODO log/error when we don't know how to treat an attribute
                 pass
         else:
-            self.content = DataRuns(bin_view[self.header.non_resident_header.rl_offset:])
+            self.content = None
+
+    def is_non_resident(self):
+        '''Helper function to check if an attribute is resident or not. Returns
+        True if it is resident, otherwise returns False'''
+        return self.header.is_non_resident
 
     def __len__(self):
         return len(self.header)
@@ -361,9 +367,6 @@ class MFT():
                 if entry is not None:
                     fn_entries.append(self[number].get_attributes(AttrTypes.FILE_NAME))
 
-            #print(self[12])
-            #print("FNENTRIES", fn_entries, entry_number)
-
             if fn_entries:
                 for attr in itertools.chain.from_iterable(fn_entries):
                     #print(attr)
@@ -372,6 +375,12 @@ class MFT():
                         temp_name = attr.content.name
 
                 #print(temp_attr)
+                if temp_attr.content.parent_seq != self[temp_attr.content.parent_ref].header.seq_number: #orphan file
+                    names.append(temp_name)
+                    names.append("_ORPHAN_")
+                    break
+                    #TODO exception?
+
                 parent = temp_attr.content.parent_ref
                 #print(curr_entry_number, parent, temp_attr.content.parent_ref)
                 curr_entry_number = parent
