@@ -4,9 +4,16 @@ import libmft.api
 #test = "./mft_samples/MFT_onefiledeleted.bin"
 #test = "./mft_samples/MFT_changed.bin"
 #test = "./mft_samples/MFT_singlefileads.bin"
+
 #test = "./mft_samples/MFT_twofolderonefile.bin"
+
+#test = "./mft_samples/MFT_simplefsdeletedfolder.bin"
+#test = "../full_sample.bin"
+
+test = "../my_mft.bin"
+
 #test = "C:/cases/full_sample.bin"
-test = "C:/cases/my_mft.bin"
+#test = "C:/cases/my_mft.bin"
 #test = "C:/Users/Julio/Downloads/MFT.bin"
 
 def main():
@@ -21,11 +28,22 @@ def main():
     # for i, entry in enumerate(mft):
     #     #if entry is not None and entry.is_deleted():
     #     if entry is not None:
+    #         #mft._find_base_entry(i)
     #         print(i, entry.is_deleted(), mft.get_full_path(i))
 
-    print(mft[166300])
+    print(mft[39])
     print()
-    print(mft[165669])
+    print(mft[41])
+
+    # print(mft[166300])
+    # print()
+    # print(mft[165669])
+
+    # print(mft[213989])
+    # print()
+    # print(mft[171977])
+    # print()
+    # print(mft[274357])
 
             # for attr in entry.attrs.values():
             #     for a in attr:

@@ -1,6 +1,9 @@
 # libmft
 
-The idea is to have a portable, "fast" way of parsing MFT records.
+The idea is to have a portable, "fast" way of parsing/reading MFT records.
+
+So far, there is no intention of implementing the ability of writing/editing
+MFT
 
 ## Getting started
 
@@ -17,7 +20,7 @@ Python >= 3.6
 ### Basic
 
 - [x] MFT Header
-- [x] Attribute Header (unamed/named)
+- [x] Attribute Header (no named/named)
 - [x] Resident Attribute Header
 - [x] Non-Resident Attribute Header
 - [x] Data runs
@@ -27,16 +30,16 @@ Python >= 3.6
 - [x] STANDARD_INFORMATION
 - [x] ATTRIBUTE_LIST
 - [x] FILE_NAME
-- [ ] OBJECT_ID
+- [x] OBJECT_ID
 - [ ] SECURITY_DESCRIPTOR
-- [ ] VOLUME_NAME
-- [ ] VOLUME_INFORMATION
+- [x] VOLUME_NAME
+- [x] VOLUME_INFORMATION
 - [x] DATA
-- [ ] INDEX_ROOT
-- [ ] INDEX_ALLOCATION
-- [ ] BITMAP
-- [ ] REPARSE_POINT
-- [ ] EA_INFORMATION
+- [x] INDEX_ROOT
+- [ ] INDEX_ALLOCATION (As this is always non-resident, it will not be implemented for now)
+- [x] BITMAP
+- [x] REPARSE_POINT
+- [x] EA_INFORMATION
 - [ ] EA
 - [ ] LOGGED_TOOL_STREAM
 

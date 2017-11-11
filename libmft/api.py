@@ -7,7 +7,8 @@ import itertools
 from libmft.util.functions import convert_filetime, apply_fixup_array, flatten
 from libmft.flagsandtypes import MftSignature, AttrTypes, MftUsageFlags
 from libmft.attrcontent import StandardInformation, FileName, IndexRoot, Data, \
-    AttributeList
+    AttributeList, Bitmap, ObjectID, VolumeName, VolumeInformation, ReparsePoint, \
+    EaInformation, LoggedToolStream
 from libmft.headers import MFTHeader, ResidentAttrHeader, NonResidentAttrHeader,  \
     AttributeHeader, DataRuns
 from libmft.exceptions import MFTEntryException
@@ -29,13 +30,29 @@ class Attribute():
                 self.content = StandardInformation(bin_view[offset:offset+length])
             elif self.header.attr_type_id is AttrTypes.ATTRIBUTE_LIST:
                 self.content = AttributeList(bin_view[offset:offset+length])
+            elif self.header.attr_type_id is AttrTypes.OBJECT_ID:
+                self.content = ObjectID(bin_view[offset:offset+length])
             elif self.header.attr_type_id is AttrTypes.FILE_NAME:
                 self.content = FileName(bin_view[offset:offset+length])
             elif self.header.attr_type_id is AttrTypes.DATA:
                 self.content = Data(bin_view[offset:offset+length])
             elif self.header.attr_type_id is AttrTypes.INDEX_ROOT:
                 self.content = IndexRoot(bin_view[offset:offset+length])
+            elif self.header.attr_type_id is AttrTypes.BITMAP:
+                self.content = Bitmap(bin_view[offset:offset+length])
+            elif self.header.attr_type_id is AttrTypes.EA_INFORMATION:
+                self.content = EaInformation(bin_view[offset:offset+length])
+            elif self.header.attr_type_id is AttrTypes.LOGGED_TOOL_STREAM:
+                self.content = LoggedToolStream(bin_view[offset:offset+length])
+            elif self.header.attr_type_id is AttrTypes.REPARSE_POINT:
+                self.content = ReparsePoint(bin_view[offset:offset+length])
+            elif self.header.attr_type_id is AttrTypes.VOLUME_NAME:
+                self.content = VolumeName(bin_view[offset:offset+length])
+            elif self.header.attr_type_id is AttrTypes.VOLUME_INFORMATION:
+                self.content = VolumeInformation(bin_view[offset:offset+length])
+
             else:
+                #print(self.header.attr_type_id)
                 #TODO log/error when we don't know how to treat an attribute
                 pass
         else:
@@ -182,10 +199,10 @@ class MFTEntry():
     #         print("MULTIPLE STD INFO HEADERS. PROBLEM.")
 
     def is_deleted(self):
-        if self.header.usage_flags is MftUsageFlags.NOT_USED:
-            return True
-        else:
+        if self.header.usage_flags & MftUsageFlags.IN_USE:
             return False
+        else:
+            return True
 
     # def get_file_size(self):
     #     #TODO this is not a good name. change it.
@@ -317,8 +334,14 @@ class MFT():
     def _find_base_entry(self, entry_number):
         return_number = entry_number
 
+        temp = [entry_number]
+
         while self[return_number].header.base_record_ref:
             return_number = self[return_number].header.base_record_ref
+            temp.append(return_number)
+
+        if len(temp) >= 3:
+            print(temp)
 
         return return_number
 

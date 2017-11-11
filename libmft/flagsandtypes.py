@@ -12,7 +12,7 @@ class MftSignature(enum.Enum):
     '''
     FILE = b"FILE"
     BAAD = b"BAAD"
-    INDX = b"INDX"
+    #INDX = b"INDX"
 
 class AttrTypes(enum.Enum):
     '''Defines the possible MFT attributes types.'''
@@ -40,6 +40,23 @@ class NameType(enum.Enum):
     DOS = 0x2 #8.3 ASCII, case insensitive
     WIN32_DOS = 0X3 #Win32 fits dos space
 
+class ReparseType(enum.Enum):
+    '''Possible tags for a reparse point based on the winnt.h'''
+    MOUNT_POINT = 0x0003
+    SYMLINK = 0x000C
+    HSM = 0x0004
+    HSM2 = 0x0006
+    SIS = 0x0008
+    WIM = 0x0008
+    CSV = 0x0009
+    DFS = 0x000A
+    DFSR = 0x0012
+    DEDUP = 0x0013
+    NFS = 0x0014
+    FILE_PLACEHOLDER = 0x0015
+    WOF = 0x0017
+    WCI = 0x0018
+
 #******************************************************************************
 # Flags
 #******************************************************************************
@@ -60,19 +77,40 @@ class FileInfoFlags(enum.IntFlag):
     CONTENT_NOT_INDEXED = 0x2000
     ENCRYPTED = 0x4000
 
-class MftUsageFlags(enum.Enum):
+class MftUsageFlags(enum.IntFlag):
     '''Identifies the possible uses of a MFT entry. If it is not
     used, a file or a directory. Mainly used be the MFTHeader, usage_flags
     '''
-    NOT_USED = 0x0000
+    #NOT_USED = 0x0000
     IN_USE = 0x0001
     DIRECTORY = 0x0002
-    DIRECTORY_IN_USE = 0x0003
-    UNKNOW = 0xFFFF
+    #DIRECTORY_IN_USE = 0x0003
+    #UNKNOW = 0xFFFF
 
-class AttrFlags(enum.Enum):
+class AttrFlags(enum.IntFlag):
     '''Represents the possible flags for the AttributeHeader class.'''
-    NORMAL = 0x0000
+    #NORMAL = 0x0000
     COMPRESSED = 0x0001
     ENCRYPTED = 0x4000
     SPARSE = 0x8000
+
+class IndexEntryFlags(enum.IntFlag):
+    '''Represents the possible flags for the IndexEntry class.'''
+    CHILD_NODE_EXISTS = 0x01
+    LAST_ENTRY = 0x02
+
+class VolumeFlags(enum.IntFlag):
+    '''Represents the possible flags for the VolumeInformation class.'''
+    IS_DIRTY = 0x0001
+    RESIZE_JOURNAL = 0x0002
+    UPGRADE_NEXT_MOUNT = 0x0004
+    MOUNTED_ON_NT4 = 0x0008
+    DELETE_USN_UNDERWAY = 0x0010
+    REPAIR_OBJECT_ID = 0x0020
+    MODIFIED_BY_CHKDISK = 0x8000
+
+class ReparseFlags(enum.IntFlag):
+    RESERVED = 0x1
+    IS_ALIAS = 0x2
+    IS_HIGH_LATENCY = 0x4
+    IS_MICROSOFT = 0x8
