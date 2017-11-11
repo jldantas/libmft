@@ -50,7 +50,6 @@ class Attribute():
                 self.content = VolumeName(bin_view[offset:offset+length])
             elif self.header.attr_type_id is AttrTypes.VOLUME_INFORMATION:
                 self.content = VolumeInformation(bin_view[offset:offset+length])
-
             else:
                 #print(self.header.attr_type_id)
                 #TODO log/error when we don't know how to treat an attribute
@@ -137,19 +136,13 @@ class MFTEntry():
             self._add_attribute(attr)
             offset += len(attr)
 
-
+    #def _get_entries_from_attr_list(self)
 
     def is_empty(self):
         if self.header is None and self.attrs is None:
             return True
         else:
             return False
-
-    def get_stream_size(self, name):
-        pass
-
-    def get_ads(self, ads_name):
-        pass
 
     def get_attributes(self, attr_type):
         '''Returns a list with one or more attributes of type "attr_type", in
@@ -159,44 +152,29 @@ class MFTEntry():
         else:
             return None
 
-    def find_related_records(self, attr_type):
+    def find_related_records(self):
         #TODO Change function name
-        #TODO change commentary
-        '''Finds all the entries that have a specific attribute by interpreting the
-        information in the ATTRIBUTE_LIST attribute. This assumes that the infomation
-        is resident and available.'''
+        '''Returns the related entries to this entry. This means three things:
+        1) The entry itself is always returned (who is more related than the entry itself?)
+        2) If the entry has a base_record, it is returned
+        3) If the entry is a base entry and has an resident ATTRIBUTE_LIST, it
+        will parse the appropriate values and return
 
-        if self.header.base_record_ref:
-            #TODO is this true?
-            raise MFTEntryException("Only parent entries have an attribute list", self.header.mft_record)
+        It does NOT matter if the entry is not in use.'''
+        records = [self.header.mft_record]
 
-        attr_list = self.get_attributes(AttrTypes.ATTRIBUTE_LIST)
-        if attr_list is not None:
-            if len(attr_list) == 1:
+        if not self.header.base_record_ref: #if we are dealing with a base record, it might have an attribute_list
+            attr_list = self.get_attributes(AttrTypes.ATTRIBUTE_LIST)
+            if attr_list is not None:
+                #TODO confirm if this is true
+                #we assume that there can be only one ATTRIBUTE_LIST per entry
                 attr = attr_list[0]
-                if not attr.header.is_non_resident:
-                    return [attr_list_entry.file_ref for attr_list_entry in attr.content if attr_list_entry.attr_type is attr_type]
-                else:
-                    #TODO exception or return?
-                    raise MFTEntryException("ATTRIBUTE_LIST is non-resident!", self.header.mft_record)
-            else:
-                #TODO is this true? Entries can have only 1 ATTRIBUTE_LIST?
-                raise MFTEntryException("More than 1 ATTRIBUTE_LIST!", self.header.mft_record)
+                if not attr.is_non_resident():
+                    records += [list_entry.file_ref for list_entry in attr.content if list_entry.attr_type is AttrTypes.FILE_NAME]
         else:
-            return None
-            #raise MFTEntryException("Only parent entries have an attribute list", self.header.mft_record)
+            records.append(self.header.base_record_ref)
 
-    # def get_standard_info(self):
-    #     '''This is a helper function that returns only the content of the
-    #     STANDARD_INFORMATION attribute. This will return a StandardInformation
-    #     instance'''
-    #     attrs = self.get_attributes(AttrTypes.STANDARD_INFORMATION)
-    #
-    #     if len(attrs) == 1:
-    #         return attrs[0].content
-    #     else:
-    #         #TODO error handling, no entry should have more than one STD INFO header, we have a problem
-    #         print("MULTIPLE STD INFO HEADERS. PROBLEM.")
+        return records
 
     def is_deleted(self):
         if self.header.usage_flags & MftUsageFlags.IN_USE:
@@ -237,10 +215,12 @@ class MFT():
         '''
         self.mft_entry_size = size
         self.entries = []
+        #this is a dictiony of lists, where the key is the parent number and
+        #the members of the list are the related entries
         self.related_entries_nr = {}
 
         data_buffer = 0
-        temp_entry_n_attr_list_nr = []
+        temp_entry_n_attr_list_nr = set()
 
         if not self.mft_entry_size:
             self.mft_entry_size = self._find_mft_size(file_pointer)
@@ -255,21 +235,9 @@ class MFT():
         for i in range(0, end):
             file_pointer.readinto(data_buffer)
             entry = MFTEntry(data_buffer, i)
-            #print(entry)
 
             if not entry.is_empty():
                 self.entries.append(entry)
-
-                # if entry.get_attributes(AttrTypes.ATTRIBUTE_LIST):
-                #     temp = entry.get_attributes(AttrTypes.ATTRIBUTE_LIST)[0]
-                #     #print(temp)
-                #     if not temp.header.is_non_resident:
-                #         for attr_list_e in temp.content:
-                #             #print(attr_list_e)
-                #             if attr_list_e.attr_type is AttrTypes.FILE_NAME and attr_list_e.file_ref != i:
-                #                 print(entry)
-                #                 print(entry.find_related_records(AttrTypes.FILE_NAME))
-                #                 raise Exception("Debug")
 
                 #we have a problem. If the entry has a non-resident ATTRIBUTE_LIST,
                 #it is impossible to find the entries based on the base record.
@@ -278,28 +246,26 @@ class MFT():
                 attr_list = entry.get_attributes(AttrTypes.ATTRIBUTE_LIST)
                 if attr_list is not None:
                     if len(attr_list) == 1 and attr_list[0].header.is_non_resident:
-                        temp_entry_n_attr_list_nr.append(i)
+                        temp_entry_n_attr_list_nr.add(i)
                     elif len(attr_list) > 1:
                         #TODO error handling? is there a case of multiple attr lists?
                         pass
             else:
                 self.entries.append(None)
 
-        '''This logic is kind of strange. Once we find all the attributes
-        that have non-resident ATTRIBUTE_LIST, we iterate over all the entries
-        in search of those that have the parent as the ones mapped. Once we find
-        the base is add to the dictonary of related entries. This should, in theory
-        allow us to identify related entries.
-        '''
-        #TODO test if this works and/or is worth
-        for i, entry in enumerate(self.entries):
-            if entry is not None:
-                base_record_ref = entry.header.base_record_ref
-                if base_record_ref in temp_entry_n_attr_list_nr:
-                    if base_record_ref not in self.related_entries_nr:
-                        self.related_entries_nr[base_record_ref] = set()
-                    self.related_entries_nr[base_record_ref].add(i)
+        self._fix_related_attr_list_non_resident(temp_entry_n_attr_list_nr)
 
+
+        # base = 0
+        # non_base = 0
+        # for i, entry in enumerate(self.entries):
+        #     if entry is not None:
+        #         if entry.header.base_record_ref:
+        #             non_base += 1
+        #         else:
+        #             base += 1
+        # print(f"base {base}, non-base {non_base}")
+        #print(self.related_entries_nr)
         #print(self.related_entries_nr)
 
         #TODO multiprocessing, see below
@@ -330,37 +296,62 @@ class MFT():
             https://stackoverflow.com/questions/11196367/processing-single-file-from-multiple-processes-in-python
         '''
 
+    def _is_related(self, parent_entry, child_entry):
+        '''This function checks if a child entry is related to the parent entry.
+        This is done by comparing the reference and sequence numbers.'''
+        if parent_entry.header.mft_record == child_entry.header.base_record_ref and \
+           parent_entry.header.seq_number == child_entry.header.base_record_seq:
+            return True
+        else:
+            return False
+
+    def _fix_related_attr_list_non_resident(self, temp_entry_n_attr_list_nr):
+        '''This function is a cheat. When we have an entry that has an
+        ATTRIBUTE_LIST as non-resident, it is impossible to find the relation
+        between entries.
+        To fix this problem, this function receives an iterable with all the entries
+        that have a non-resident ATTRIBUTE_LIST and search the other entries
+        checking for which ones have reference to the ones flagged.
+        Once it has been found, it puts the information in the variable
+        self.related_entries_nr.
+        '''
+        #TODO test if this works and/or is worth
+        for i, entry in enumerate(self.entries):
+            if entry is not None:
+                base_record_ref = entry.header.base_record_ref
+                if base_record_ref in temp_entry_n_attr_list_nr and self._is_related(self[base_record_ref], self[i]):
+                    if base_record_ref not in self.related_entries_nr:
+                        self.related_entries_nr[base_record_ref] = set()
+                    self.related_entries_nr[base_record_ref].add(i)
 
     def _find_base_entry(self, entry_number):
-        return_number = entry_number
+        '''Find the base entry of an entry. NTFS allows only a relationship of
+        one level. If we have something more is because we might have a deleted
+        entry messing up.
 
-        temp = [entry_number]
+        In case of the entry is a base entry, it will return the entry number That
+        was provided
+        '''
+        entry = self[entry_number]
 
-        while self[return_number].header.base_record_ref:
-            return_number = self[return_number].header.base_record_ref
-            temp.append(return_number)
+        if not entry.header.base_record_ref:
+            return entry_number
+        else:
+            if self._is_related(self[entry.header.base_record_ref], entry):
+                return entry.header.base_record_ref
+            else: #if the entries are not related, we have an error, probably because of a deleted entry
+                #TODO error handling
+                pass
 
-        if len(temp) >= 3:
-            print(temp)
 
-        return return_number
-
-    def _get_related_entries(self, entry_number, attr_type=None):
+    def _get_related_entries(self, entry_number):
         #TODO test if entry referenced by entry_number is None?
         parent_entry_number = self._find_base_entry(entry_number)
         data = []
 
         if parent_entry_number in self.related_entries_nr:
             data.append(self.related_entries_nr[parent_entry_number])
-
-        if attr_type is not None:
-            entry = self[parent_entry_number]
-            try:
-                related_rec = entry.find_related_records(attr_type)
-                if related_rec is not None:
-                    data.append(related_rec)
-            except MFTEntryException as e:
-                MOD_LOGGER.exception("Data not found?")
+        data += self[parent_entry_number].find_related_records()
 
         return data
 
@@ -374,24 +365,16 @@ class MFT():
         parent = 0
 
         if self[entry_number] is None:
-            #TODO better way of doing this? exception? empty string? None?
-            #I'm leaving empty string for now, so it is consistent (alwayes return string)
-            return ""
-        #entry = self._find_base_entry(entry_number)
+            return None
 
         while parent != root_id:
-            fn_entries = []
+            fn_attrs = []
 
-            numbers = self._get_related_entries(curr_entry_number, AttrTypes.FILE_NAME)
-            numbers.append(curr_entry_number)
-            #print(numbers)
-            for number in flatten(numbers):
-                entry  = self[number].get_attributes(AttrTypes.FILE_NAME)
-                if entry is not None:
-                    fn_entries.append(self[number].get_attributes(AttrTypes.FILE_NAME))
+            numbers = set(self._get_related_entries(curr_entry_number))
+            fn_attrs = [self[n].get_attributes(AttrTypes.FILE_NAME) for n in numbers if self[n] is not None]
 
-            if fn_entries:
-                for attr in itertools.chain.from_iterable(fn_entries):
+            if fn_attrs:
+                for attr in itertools.chain.from_iterable(fn_attrs):
                     #print(attr)
                     if attr.content.name_len > len(temp_name):
                         temp_attr = attr

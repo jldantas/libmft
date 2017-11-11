@@ -31,9 +31,16 @@ def main():
     #         #mft._find_base_entry(i)
     #         print(i, entry.is_deleted(), mft.get_full_path(i))
 
-    print(mft[39])
-    print()
-    print(mft[41])
+    i = 98126
+    print(i, mft[i].is_deleted(), mft.get_full_path(i))
+
+    # print(mft[39])
+    # print()
+    # print(mft[41])
+
+    # a = [92924, 5123, 5126, 4999, 5000, 5128, 5072, 5074, 5077, 5079, 5210, 5211, 5212, 5091, 228, 5092, 5098, 5106, 5111, 5114, 5115, 95486]
+    # for b in a:
+    #     print(mft[b])
 
     # print(mft[166300])
     # print()

@@ -76,6 +76,8 @@ class FileInfoFlags(enum.IntFlag):
     OFFLINE = 0x1000
     CONTENT_NOT_INDEXED = 0x2000
     ENCRYPTED = 0x4000
+    DIRECTORY = 0x10000000
+    INDEX_VIEW = 0x20000000
 
 class MftUsageFlags(enum.IntFlag):
     '''Identifies the possible uses of a MFT entry. If it is not
