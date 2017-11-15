@@ -10,10 +10,10 @@ import libmft.api
 #test = "./mft_samples/MFT_simplefsdeletedfolder.bin"
 #test = "../full_sample.bin"
 
-test = "../my_mft.bin"
+#test = "../my_mft.bin"
 
 #test = "C:/cases/full_sample.bin"
-#test = "C:/cases/my_mft.bin"
+test = "C:/cases/my_mft.bin"
 #test = "C:/Users/Julio/Downloads/MFT.bin"
 
 def main():

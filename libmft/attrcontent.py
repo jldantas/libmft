@@ -9,6 +9,7 @@ behaviour.
 '''
 import struct
 import logging
+from itertools import chain as _chain
 
 from libmft.util.functions import convert_filetime, get_file_reference
 from libmft.exceptions import AttrContentException
@@ -27,8 +28,8 @@ class StandardInformation():
     '''Represents the STANDARD_INFORMATION converting the timestamps to
     datetimes and the flags to FileInfoFlags representation.
     '''
-    _REPR = struct.Struct("<4Q6I2Q")
-    _REPR_NTFS_LE_3 = struct.Struct("<4Q4I")
+    _REPR = struct.Struct("<4Q4I")
+    _REPR_NFTS_3_EXTENSION = struct.Struct("<2I2Q")
     ''' Creation time - 8
         File altered time - 8
         MFT/Metadata altered time - 8
@@ -43,43 +44,41 @@ class StandardInformation():
         Update Sequence Number (USN) - 8 (NTFS 3+)
     '''
 
-    def __init__(self, attr_view):
-        '''Creates a StandardInformation object. "attr_view" has to have the
-        correct size for this attribute. It accounts for versions of NTFS < 3 and
-        NTFS > 3.
+    def __init__(self, content=(None,)*12):
+        '''Creates a StandardInformation object. The content has to be an iterable
+        with precisely 12 objects in order. Creation of the object from a binary
+        string/memoryview can be done using the class method 'create_from_binary'
         '''
-        try:
-            temp = self._REPR.unpack(attr_view)
-            ntfs3_plus = True
-        except struct.error:
-            temp = self._REPR_NTFS_LE_3.unpack(attr_view)
-            ntfs3_plus = False
-
         self.timestamps = {}
-        self.timestamps["created"] = convert_filetime(temp[0])
-        self.timestamps["changed"] = convert_filetime(temp[1])
-        self.timestamps["mft_change"] = convert_filetime(temp[2])
-        self.timestamps["accessed"] = convert_filetime(temp[3])
-        self.flags = FileInfoFlags(temp[4])
-        self.max_n_ver = temp[5]
-        self.ver_n = temp[6]
-        self.class_id = temp[7]
-        if (ntfs3_plus):
-            self.owner_id = temp[8]
-            self.security_id = temp[9]
-            self.quota_charged = temp[10]
-            self.usn = temp[11]
-        else:
-            self.owner_id = None
-            self.security_id = None
-            self.quota_charged = None
-            self.usn = None
+
+        self.timestamps["created"], self.timestamps["changed"], \
+        self.timestamps["mft_change"], self.timestamps["accessed"], \
+        self.flags, self.max_n_ver, self.ver_n, self.class_id, self.owner_id, \
+        self.security_id, self.quota_charged, self.usn = content
+
+        if self.flags is not None: #we might have an "empty" oject, so convert only if it is valid
+            #flags and timestaps have specific format, so we convert them
+            self.timestamps["created"] = convert_filetime(self.timestamps["created"])
+            self.timestamps["changed"] = convert_filetime(self.timestamps["changed"])
+            self.timestamps["mft_change"] = convert_filetime(self.timestamps["mft_change"])
+            self.timestamps["accessed"] = convert_filetime(self.timestamps["accessed"])
+            self.flags = FileInfoFlags(self.flags)
 
     @classmethod
     def get_content_size(cls):
         '''Return the size of the STANDARD_INFORMATION content, always considering
         a NFTS version >3.'''
-        return cls._REPR.size
+        return cls._REPR.size + cls._REPR_NFTS_3_EXTENSION.size
+
+    @classmethod
+    def create_from_binary(cls, binary_view):
+        main_content = cls._REPR.unpack(binary_view[:cls._REPR.size])
+        if len(binary_view) != cls._REPR.size:
+            ntfs3_extension = cls._REPR_NFTS_3_EXTENSION.unpack(binary_view[cls._REPR.size:])
+        else:
+            ntfs3_extension = (None, None, None, None)
+
+        return cls(_chain(main_content, ntfs3_extension))
 
     def get_created_time(self):
         '''Return the created time. This function provides the same information
@@ -124,23 +123,38 @@ class AttributeListEntry():
         Name (unicode) - variable
     '''
 
-    def __init__(self, entry_view):
-        '''Creates a AttributeListEntry object. Expects that "entry_view" starts
-        at the beginning of the entry. Once the basic information is loaded,
-        find the correct size of the entry.'''
-        temp = self._REPR.unpack(entry_view[:self._REPR.size])
+    def __init__(self, content=(None,)*8):
+        '''Creates a AttributeListEntry object. The content has to be an iterable
+        with precisely 8 objects in order. Creation of the object from a binary
+        string/memoryview can be done using the class method 'create_from_binary'''
+        self.attr_type, self.entry_len, name_len, self.name_offset, \
+        self.start_vcn, file_coded_reference, self.attr_id, self.name = content
 
-        self.attr_type = AttrTypes(temp[0])
-        self.entry_len = temp[1]
-        self.name_len = temp[2]
-        self.name_offset = temp[3]
-        self.start_vcn = temp[4]
-        self.file_ref, self.file_seq = get_file_reference(temp[5])
-        self.attr_id = temp[6]
-        if self.name_len:
-            self.name = entry_view[self.name_offset:self.name_offset+(2*self.name_len)].tobytes().decode("utf_16_le")
+        if self.attr_type is not None:
+            self.attr_type = AttrTypes(self.attr_type)
+            self.file_ref, self.file_seq = get_file_reference(file_coded_reference)
         else:
-            self.name = None
+            self.file_ref, self.file_seq = None, None
+
+    def _get_name_length(self):
+        '''Returns the length of the name based on the name'''
+        if self.name is None:
+            return 0
+        else:
+            return len(self.name)
+
+    #the name length can derived from the name, so, we don't need to keep in memory
+    name_len = property(_get_name_length, doc='Length of the name')
+
+    @classmethod
+    def create_from_binary(cls, binary_view):
+        content = cls._REPR.unpack(binary_view[:cls._REPR.size])
+        if content[2]:
+            name = binary_view[content[3]:content[3]+(2*content[2])].tobytes().decode("utf_16_le")
+        else:
+            name = None
+
+        return cls(_chain(content, (name,)))
 
     def __len__(self):
         '''Returns the size of the entry, in bytes'''
@@ -155,17 +169,27 @@ class AttributeListEntry():
 class AttributeList():
     '''Represents the ATTRIBUTE_LIST attribute, holding all the entries, if available,
     as AttributeListEntry objects.'''
-    def __init__(self, attr_view):
-        #TODO change from list to dict?
-        self.attr_list = []
 
+    def __init__(self, content=[]):
+        '''Creates an AttributeList content representation. Content has to be a
+        list of AttributeListEntry that will be referred by the object. To create
+        from a binary string, use the function 'create_from_binary' '''
+        #TODO change from list to dict?
+        self.attr_list = content
+
+    @classmethod
+    def create_from_binary(cls, binary_view):
+        attr_list = []
         offset = 0
+
         while True:
-            entry = AttributeListEntry(attr_view[offset:])
+            entry = AttributeListEntry.create_from_binary(binary_view[offset:])
             offset += entry.entry_len
-            self.attr_list.append(entry)
-            if offset >= len(attr_view):
+            attr_list.append(entry)
+            if offset >= len(binary_view):
                 break
+
+        return cls(attr_list)
 
     def __len__(self):
         '''Return the number of entries in the attribute list'''
@@ -208,23 +232,19 @@ class UID():
             self.volume_id, self.object_id)
 
 class ObjectID():
-    def __init__(self, attr_view):
-
+    def __init__(self,  content=(None,)*4):
         uid_size = UID.get_uid_size()
 
-        self.object_id = None
-        self.birth_vol_id = None
-        self.birth_object_id = None
-        self.birth_domain_id = None
+        self.object_id, self.birth_vol_id, self.birth_object_id, \
+        self.birth_domain_id = content
 
-        if len(attr_view) >= uid_size:
-            self.object_id = UID(attr_view[:uid_size])
-        if len(attr_view) >= uid_size * 2:
-            self.birth_vol_id = UID(attr_view[2*uid_size:uid_size])
-        if len(attr_view) >= uid_size * 3:
-            self.birth_object_id = UID(attr_view[3*uid_size:uid_size])
-        if len(attr_view) >= uid_size * 4:
-            self.birth_domain_id = UID(attr_view[4*uid_size:uid_size])
+    @classmethod
+    def create_from_binary(cls, binary_view):
+        uid_size = UID.get_uid_size()
+
+        uids = [UID(binary_view[i*uid_size:(i+1)*uid_size]) if i * uid_size < len(binary_view) else None for i in range(0,4)]
+
+        return cls(uids)
 
     def __repr__(self):
         'Return a nicely formatted representation string'
@@ -235,8 +255,17 @@ class ObjectID():
 # VOLUME_NAME ATTRIBUTE
 #******************************************************************************
 class VolumeName():
-    def __init__(self, name_view):
-        self.name = name_view.tobytes().decode("utf_16_le")
+    def __init__(self, name):
+        self.name = name
+
+    @classmethod
+    def create_from_binary(cls, binary_view):
+        name = binary_view.tobytes().decode("utf_16_le")
+
+        return cls(name)
+
+    def __len__(self):
+        return len(self.name)
 
     def __repr__(self):
         'Return a nicely formatted representation string'
@@ -254,13 +283,14 @@ class VolumeInformation():
         Volume flags - 2
     '''
 
-    def __init__(self, attr_view):
-        temp = self._REPR.unpack(attr_view)
-
+    def __init__(self, content=(None,)*4):
         #self._unknow = temp[0]
-        self.major_ver = temp[1]
-        self.minor_ver = temp[2]
-        self.vol_flags = VolumeFlags(temp[3])
+        _, self.major_ver, self.minor_ver, self.vol_flags = content
+        self.vol_flags = VolumeFlags(self.vol_flags)
+
+    @classmethod
+    def create_from_binary(cls, binary_view):
+        return cls(cls._REPR.unpack(binary_view))
 
     def __repr__(self):
         'Return a nicely formatted representation string'
@@ -289,28 +319,45 @@ class FileName():
         Name - variable
     '''
 
-    def __init__(self, attr_view):
+    def __init__(self, content=(None, )*12):
         '''Creates a FILE_NAME object. "attr_view" is the full attribute
         content, where the first bytes is the beginning of the content of the
         attribute'''
-        temp = self._REPR.unpack(attr_view[:self._REPR.size])
-
         self.timestamps = {}
-        self.parent_ref, self.parent_seq = get_file_reference(temp[0])
-        self.timestamps["created"] = convert_filetime(temp[1])
-        self.timestamps["changed"] = convert_filetime(temp[2])
-        self.timestamps["mft_change"] = convert_filetime(temp[3])
-        self.timestamps["accessed"] = convert_filetime(temp[4])
-        self.allocated_file_size = temp[5]
-        self.file_size = temp[6]
-        self.flags = FileInfoFlags(temp[7])
-        self.reparse_value = temp[8]
-        self.name_len = temp[9]
-        self.name_type = NameType(temp[10])
-        self.name = attr_view[self._REPR.size:].tobytes().decode("utf_16_le")
+
+        parent_coded_reference, self.timestamps["created"], \
+        self.timestamps["changed"], self.timestamps["mft_change"], \
+        self.timestamps["accessed"], self.allocated_file_size, self.file_size, \
+        self.flags, self.reparse_value, name_len, self.name_type, \
+        self.name = content
+
+        if parent_coded_reference is not None:
+            self.parent_ref, self.parent_seq = get_file_reference(parent_coded_reference)
+            self.timestamps["created"] = convert_filetime(self.timestamps["created"])
+            self.timestamps["changed"] = convert_filetime(self.timestamps["changed"])
+            self.timestamps["mft_change"] = convert_filetime(self.timestamps["mft_change"])
+            self.timestamps["accessed"] = convert_filetime(self.timestamps["accessed"])
+            self.flags = FileInfoFlags(self.flags)
+            self.name_type = NameType(self.name_type)
+        else:
+            self.parent_ref, self.parent_seq = None, None
+
         if len(self.name) != self.name_len:
             MOD_LOGGER.error("Expected file name size does not match.")
             raise AttrContentException("Error processing FILE_NAME Attr. File name size does not match")
+
+    def _get_name_len(self):
+        return len(self.name)
+
+    #the name length can derived from the name, so, we don't need to keep in memory
+    name_len = property(_get_name_len, doc='Length of the name')
+
+    @classmethod
+    def create_from_binary(cls, binary_view):
+        content = cls._REPR.unpack(binary_view[:cls._REPR.size])
+        name = binary_view[cls._REPR.size:].tobytes().decode("utf_16_le")
+
+        return cls(_chain(content, (name,)))
 
     def get_created_time(self):
         '''Return the created time. This function provides the same information
@@ -422,7 +469,7 @@ class IndexEntry():
         if content_is_filename:
             self.file_ref, self.file_seq = get_file_reference(temp[0])
             if self.content_len:
-                self.content = FileName(entry_view[IndexEntry._REPR.size:IndexEntry._REPR.size+self.content_len])
+                self.content = FileName.create_from_binary(entry_view[IndexEntry._REPR.size:IndexEntry._REPR.size+self.content_len])
         else:
             self.generic = temp[0] #TODO don't save this here and overload later?
             if self.content_len:

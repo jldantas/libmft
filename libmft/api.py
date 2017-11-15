@@ -27,13 +27,13 @@ class Attribute():
             length = self.header.resident_header.content_len
 
             if self.header.attr_type_id is AttrTypes.STANDARD_INFORMATION:
-                self.content = StandardInformation(bin_view[offset:offset+length])
+                self.content = StandardInformation.create_from_binary(bin_view[offset:offset+length])
             elif self.header.attr_type_id is AttrTypes.ATTRIBUTE_LIST:
-                self.content = AttributeList(bin_view[offset:offset+length])
+                self.content = AttributeList.create_from_binary(bin_view[offset:offset+length])
             elif self.header.attr_type_id is AttrTypes.OBJECT_ID:
-                self.content = ObjectID(bin_view[offset:offset+length])
+                self.content = ObjectID.create_from_binary(bin_view[offset:offset+length])
             elif self.header.attr_type_id is AttrTypes.FILE_NAME:
-                self.content = FileName(bin_view[offset:offset+length])
+                self.content = FileName.create_from_binary(bin_view[offset:offset+length])
             elif self.header.attr_type_id is AttrTypes.DATA:
                 self.content = Data(bin_view[offset:offset+length])
             elif self.header.attr_type_id is AttrTypes.INDEX_ROOT:
@@ -47,9 +47,9 @@ class Attribute():
             elif self.header.attr_type_id is AttrTypes.REPARSE_POINT:
                 self.content = ReparsePoint(bin_view[offset:offset+length])
             elif self.header.attr_type_id is AttrTypes.VOLUME_NAME:
-                self.content = VolumeName(bin_view[offset:offset+length])
+                self.content = VolumeName.create_from_binary(bin_view[offset:offset+length])
             elif self.header.attr_type_id is AttrTypes.VOLUME_INFORMATION:
-                self.content = VolumeInformation(bin_view[offset:offset+length])
+                self.content = VolumeInformation.create_from_binary(bin_view[offset:offset+length])
             else:
                 #print(self.header.attr_type_id)
                 #TODO log/error when we don't know how to treat an attribute
