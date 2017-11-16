@@ -26,18 +26,18 @@ class Attribute():
             offset = self.header.resident_header.content_offset
             length = self.header.resident_header.content_len
 
-            if self.header.attr_type_id is AttrTypes.STANDARD_INFORMATION:
+            if self.header.attr_type_id is AttrTypes.FILE_NAME:
+                self.content = FileName.create_from_binary(bin_view[offset:offset+length])
+            elif self.header.attr_type_id is AttrTypes.STANDARD_INFORMATION:
                 self.content = StandardInformation.create_from_binary(bin_view[offset:offset+length])
+            elif self.header.attr_type_id is AttrTypes.INDEX_ROOT:
+                self.content = IndexRoot.create_from_binary(bin_view[offset:offset+length])
             elif self.header.attr_type_id is AttrTypes.ATTRIBUTE_LIST:
                 self.content = AttributeList.create_from_binary(bin_view[offset:offset+length])
-            elif self.header.attr_type_id is AttrTypes.OBJECT_ID:
-                self.content = ObjectID.create_from_binary(bin_view[offset:offset+length])
-            elif self.header.attr_type_id is AttrTypes.FILE_NAME:
-                self.content = FileName.create_from_binary(bin_view[offset:offset+length])
             elif self.header.attr_type_id is AttrTypes.DATA:
                 self.content = Data(bin_view[offset:offset+length])
-            elif self.header.attr_type_id is AttrTypes.INDEX_ROOT:
-                self.content = IndexRoot(bin_view[offset:offset+length])
+            elif self.header.attr_type_id is AttrTypes.OBJECT_ID:
+                self.content = ObjectID.create_from_binary(bin_view[offset:offset+length])
             elif self.header.attr_type_id is AttrTypes.BITMAP:
                 self.content = Bitmap(bin_view[offset:offset+length])
             elif self.header.attr_type_id is AttrTypes.EA_INFORMATION:
@@ -45,7 +45,7 @@ class Attribute():
             elif self.header.attr_type_id is AttrTypes.LOGGED_TOOL_STREAM:
                 self.content = LoggedToolStream(bin_view[offset:offset+length])
             elif self.header.attr_type_id is AttrTypes.REPARSE_POINT:
-                self.content = ReparsePoint(bin_view[offset:offset+length])
+                self.content = ReparsePoint.create_from_binary(bin_view[offset:offset+length])
             elif self.header.attr_type_id is AttrTypes.VOLUME_NAME:
                 self.content = VolumeName.create_from_binary(bin_view[offset:offset+length])
             elif self.header.attr_type_id is AttrTypes.VOLUME_INFORMATION:

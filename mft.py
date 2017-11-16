@@ -34,6 +34,18 @@ def main():
     i = 98126
     print(i, mft[i].is_deleted(), mft.get_full_path(i))
 
+    stats = {}
+    for i, entry in enumerate(mft):
+        if entry is not None:
+            for key, l in entry.attrs.items():
+                if key.name not in stats:
+                    stats[key.name] = 0
+                stats[key.name] += len(l)
+
+    print(stats)
+
+
+
     # print(mft[39])
     # print()
     # print(mft[41])

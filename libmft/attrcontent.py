@@ -404,18 +404,16 @@ class Data():
         '''Initialize the class. Expects the binary_view that represents the
         content. Size information is derived from the content.
         '''
-        self.size = len(bin_view)
-        self.size_on_disk = len(bin_view)
         self.content = bin_view.tobytes()
 
     def __len__(self):
         '''Returns the logical size of the file'''
-        return self.size
+        return len(self.content)
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(size={}, content={})'.format(
-            self.size, self.content)
+        return self.__class__.__name__ + '(content={})'.format(
+            self.content)
 
 #******************************************************************************
 # INDEX_ROOT ATTRIBUTE
@@ -430,13 +428,15 @@ class IndexNodeHeader():
         Flags - 4
     '''
 
-    def __init__(self, node_view):
-        temp = IndexNodeHeader._REPR.unpack(node_view[:IndexNodeHeader._REPR.size])
+    def __init__(self, content):
+        self.start_offset, self.end_offset, self.end_alloc_offset, \
+        self.flags = content
 
-        self.start_offset = temp[0]
-        self.end_offset = temp[1]
-        self.end_alloc_offset = temp[2]
-        self.flags = temp[3]
+    @classmethod
+    def create_from_binary(cls, binary_view):
+        content = cls._REPR.unpack(binary_view[:cls._REPR.size])
+
+        return cls(content)
 
     def __repr__(self):
         'Return a nicely formatted representation string'
@@ -447,78 +447,74 @@ class IndexEntry():
     _REPR = struct.Struct("<Q2HI")
     ''' Undefined - 8
         Length of entry - 2
-        Length of content - 4
+        Length of content - 2
         Flags - 4
         Content - variable
         VCN of child node - 8 (exists only if flag is set, aligned to a 8 byte boundary)
     '''
     _REPR_VCN = struct.Struct("<Q")
 
-    def __init__(self, entry_view, content_is_filename):
-        temp = IndexEntry._REPR.unpack(entry_view[:IndexEntry._REPR.size])
-        #TODO this looks like a terrible practice, redo!
-        self._content_is_filename = content_is_filename
+    def __init__(self, content=(None,)*6):
+        #TODO don't save this here and overload later?
+        self.generic, self.entry_len, self.content_len, self.flags, \
+        self.content, self.vcn_child_node = content
 
-        self.generic = temp[0] #TODO don't save this here and overload later?
-        self.entry_len = temp[1]
-        self.content_len = temp[2]
-        self.flags = IndexEntryFlags(temp[3])
-        self.content = None
-        self.vcn_child_node = None
+        if self.flags is not None:
+            self.flags = IndexEntryFlags(self.flags)
 
-        if content_is_filename:
-            self.file_ref, self.file_seq = get_file_reference(temp[0])
-            if self.content_len:
-                self.content = FileName.create_from_binary(entry_view[IndexEntry._REPR.size:IndexEntry._REPR.size+self.content_len])
+    @classmethod
+    def create_from_binary(cls, binary_view, content_type=None):
+        repr_size = cls._REPR.size
+        content = cls._REPR.unpack(binary_view[:repr_size])
+
+        vcn_child_node = (None,)
+        if content_type is AttrTypes.FILE_NAME and content[2]:
+            binary_content = FileName.create_from_binary(binary_view[repr_size:repr_size+content[2]])
         else:
-            self.generic = temp[0] #TODO don't save this here and overload later?
-            if self.content_len:
-                self.contect = entry_view[IndexEntry._REPR.size:IndexEntry._REPR.size+self.content_len].tobytes()
+            binary_content = binary_view[repr_size:repr_size+content[2]].tobytes()
+        if content[3] & IndexEntryFlags.CHILD_NODE_EXISTS:
+            temp_size = repr_size + content[2]
+            boundary_fix = (content[1] - temp_size) % 8
+            vcn_child_node = cls._REPR_VCN.unpack(binary_view[temp_size+boundary_fix:temp_size+boundary_fix+8])
 
-        if self.flags & IndexEntryFlags.CHILD_NODE_EXISTS:
-            temp_size = IndexEntry._REPR.size + self.content_len
-            boundary_fix = (self.entry_len - IndexEntry._REPR.size + self.content_len) % 8
-            self.vcn_child_node = IndexEntry._REPR_VCN.unpack(entry_view[temp_size+boundary_fix:temp_size+boundary_fix+8])[0]
+        return cls(_chain(content, (binary_content,), vcn_child_node))
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        if self._content_is_filename:
-            return self.__class__.__name__ + '(file_ref={}, file_seq={}, entry_len={}, content_len={}, flags={!s}, content={}, vcn_child_node={})'.format(
-                self.file_ref, self.file_seq, self.entry_len, self.content_len,
-                self.flags, self.content, self.vcn_child_node)
-        else:
-            return self.__class__.__name__ + '(generic={}, entry_len={}, content_len={}, flags={!s}, content={}, vcn_child_node={})'.format(
-                self.generic, self.entry_len, self.content_len, self.flags,
-                self.content, self.vcn_child_node)
+        return self.__class__.__name__ + '(generic={}, entry_len={}, content_len={}, flags={!s}, content={}, vcn_child_node={})'.format(
+            self.generic, self.entry_len, self.content_len, self.flags,
+            self.content, self.vcn_child_node)
 
 class IndexRoot():
     '''Represents the INDEX_ROOT'''
     _REPR = struct.Struct("<3IB3x")
 
-    def __init__(self, attr_view):
-        temp = IndexRoot._REPR.unpack(attr_view[:IndexRoot._REPR.size])
+    def __init__(self, content=(None,)*4, node_header=None, idx_entry_list=None):
+        self.attr_type, self.collation_rule, self.index_len_in_bytes, \
+        self.index_len_in_cluster = content
+        self.node_header = node_header
+        self.index_entry_list = idx_entry_list
 
-        if temp[0]:
-            self.attr_type = AttrTypes(temp[0])
-        else:
-            self.attr_type = None #TODO changing type in the middle is not good. review.
-        self.collation_rule = temp[1] #TODO identify this?
-        self.index_len_in_bytes = temp[2]
-        self.index_len_in_cluster = temp[3]
-        self.node_header = IndexNodeHeader(attr_view[IndexRoot._REPR.size:])
-        self.index_entry_list = []
+        if self.attr_type:
+            self.attr_type = AttrTypes(self.attr_type)
 
-        offset = IndexRoot._REPR.size + self.node_header.start_offset
+    @classmethod
+    def create_from_binary(cls, binary_view):
+        content = cls._REPR.unpack(binary_view[:cls._REPR.size])
+        node_header = IndexNodeHeader.create_from_binary(binary_view[cls._REPR.size:])
+        index_entry_list = []
+        attr_type = AttrTypes(content[0]) if content[0] else None
+
+        offset = cls._REPR.size + node_header.start_offset
         while True:
-            if self.attr_type is AttrTypes.FILE_NAME:
-                entry = IndexEntry(attr_view[offset:], True)
-            else:
-                entry = IndexEntry(attr_view[offset:], False)
-            self.index_entry_list.append(entry)
+            entry = IndexEntry.create_from_binary(binary_view[offset:], attr_type)
+            index_entry_list.append(entry)
             if entry.flags & IndexEntryFlags.LAST_ENTRY:
                 break
             else:
                 offset += entry.entry_len
+
+        return cls(content, node_header, index_entry_list)
 
     @classmethod
     def size(cls):
@@ -555,11 +551,20 @@ class JunctionOrMount():
         Offset to print name - 2 (relative to 16th byte)
         Length of print name - 2
     '''
-    def __init__(self, point_view):
-        temp = JunctionOrMount._REPR.unpack(point_view[:JunctionOrMount._REPR.size])
+    def __init__(self, target_name=None, print_name=None):
+        self.target_name, self.print_name = target_name, print_name
 
-        self.target_name = point_view[8+temp[0]:8+temp[0]+temp[1]].tobytes().decode("utf_16_le")
-        self.print_name = point_view[8+temp[2]:8+temp[3]+temp[1]].tobytes().decode("utf_16_le")
+    @classmethod
+    def create_from_binary(cls, binary_view):
+        content = cls._REPR.unpack(binary_view[:cls._REPR.size])
+        repar_point_size = ReparsePoint.get_struct_size()
+
+        offset = repar_point_size + content[0]
+        target_name = binary_view[offset:offset+content[1]].tobytes().decode("utf_16_le")
+        offset = repar_point_size + content[2]
+        print_name = binary_view[offset:offset+content[3]].tobytes().decode("utf_16_le")
+
+        return cls(target_name, print_name)
 
     def __repr__(self):
         'Return a nicely formatted representation string'
@@ -570,28 +575,61 @@ class ReparsePoint():
     _REPR = struct.Struct("<IH2x")
     ''' Reparse type flags - 4
             Reparse tag - 4 bits
-            Reserver - 12 bits
+            Reserved - 12 bits
             Reparse type - 2
         Reparse data length - 2
         Padding - 2
     '''
-    def __init__(self, attr_view):
-        temp = ReparsePoint._REPR.unpack(attr_view[:ReparsePoint._REPR.size])
+    def __init__(self, content=(None,)*5):
+        self.reparse_type, self.reparse_flags, self.data_len, \
+        self.guid, self.data = content
 
-        self.reparse_flags = ReparseFlags((temp[0] & 0xF0000000) >> 28)
-        self.data_len = temp[1]
-        if self.reparse_flags & ReparseFlags.IS_MICROSOFT: #not a microsoft tag
-            self.reparse_type = ReparseType(temp[0] & 0x0000FFFF)
-            self.guid = None #guid exists only in third party reparse points
+        if self.reparse_type:
+            self.reparse_flags = ReparseFlags(self.reparse_flags)
+            self.reparse_type = ReparseType(self.reparse_type)
 
-            if self.reparse_type is ReparseType.MOUNT_POINT or self.reparse_type is ReparseType.SYMLINK:
-                self.data = JunctionOrMount(attr_view[ReparsePoint._REPR.size:])
+        print(self)
+    # def __init__(self, attr_view):
+    #     temp = ReparsePoint._REPR.unpack(attr_view[:ReparsePoint._REPR.size])
+    #
+    #     self.reparse_flags = ReparseFlags((temp[0] & 0xF0000000) >> 28)
+    #     self.data_len = temp[1]
+    #     if self.reparse_flags & ReparseFlags.IS_MICROSOFT: #not a microsoft tag
+    #         self.reparse_type = ReparseType(temp[0] & 0x0000FFFF)
+    #         self.guid = None #guid exists only in third party reparse points
+    #
+    #         if self.reparse_type is ReparseType.MOUNT_POINT or self.reparse_type is ReparseType.SYMLINK:
+    #             self.data = JunctionOrMount.create_from_binary(attr_view[ReparsePoint._REPR.size:])
+    #         else:
+    #             self.data = attr_view[ReparsePoint._REPR.size:].tobytes()
+    #     else:
+    #         self.reparse_type = temp[0] & 0x0000FFFF #we don't know how to interpret the third party tag, so put it raw
+    #         self.guid = attr_view[ReparsePoint._REPR.size:ReparsePoint._REPR.size+16].tobytes()
+    #         self.data = attr_view[ReparsePoint._REPR.size+len(self.guid):].tobytes()
+
+    @classmethod
+    def create_from_binary(cls, binary_view):
+        content = cls._REPR.unpack(binary_view[:cls._REPR.size])
+
+        #reparse_tag (type, flags) data_len, guid, data
+        #TODO rework this. A lot of duplicated effort (create tuple, expand tuple, casting, etc)
+        reparse_flag = (content[0] & 0xF0000000) >> 28
+        reparse_type = content[0] & 0x0000FFFF
+        guid = None #guid exists only in third party reparse points
+        if reparse_flag & ReparseFlags.IS_MICROSOFT:#a microsoft tag
+            if ReparseType(reparse_type) is ReparseType.MOUNT_POINT or reparse_type is ReparseType.SYMLINK:
+                data = JunctionOrMount.create_from_binary(binary_view[cls._REPR.size:])
             else:
-                self.data = attr_view[ReparsePoint._REPR.size:].tobytes()
+                data = binary_view[cls._REPR.size:].tobytes()
         else:
-            self.reparse_type = temp[0] & 0x0000FFFF #we don't know how to interpret the third party tag, so put it raw
-            self.guid = attr_view[ReparsePoint._REPR.size:ReparsePoint._REPR.size+16].tobytes()
-            self.data = attr_view[ReparsePoint._REPR.size+len(self.guid):].tobytes()
+            guid = binary_view[cls._REPR.size:cls._REPR.size+16].tobytes()
+            data = binary_view[cls._REPR.size+len(guid):].tobytes()
+
+        return cls((reparse_type, reparse_flag, content[1], guid, data))
+
+    @classmethod
+    def get_struct_size(cls):
+        return cls._REPR.size
 
     def __repr__(self):
         'Return a nicely formatted representation string'
