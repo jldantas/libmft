@@ -588,25 +588,6 @@ class ReparsePoint():
             self.reparse_flags = ReparseFlags(self.reparse_flags)
             self.reparse_type = ReparseType(self.reparse_type)
 
-        print(self)
-    # def __init__(self, attr_view):
-    #     temp = ReparsePoint._REPR.unpack(attr_view[:ReparsePoint._REPR.size])
-    #
-    #     self.reparse_flags = ReparseFlags((temp[0] & 0xF0000000) >> 28)
-    #     self.data_len = temp[1]
-    #     if self.reparse_flags & ReparseFlags.IS_MICROSOFT: #not a microsoft tag
-    #         self.reparse_type = ReparseType(temp[0] & 0x0000FFFF)
-    #         self.guid = None #guid exists only in third party reparse points
-    #
-    #         if self.reparse_type is ReparseType.MOUNT_POINT or self.reparse_type is ReparseType.SYMLINK:
-    #             self.data = JunctionOrMount.create_from_binary(attr_view[ReparsePoint._REPR.size:])
-    #         else:
-    #             self.data = attr_view[ReparsePoint._REPR.size:].tobytes()
-    #     else:
-    #         self.reparse_type = temp[0] & 0x0000FFFF #we don't know how to interpret the third party tag, so put it raw
-    #         self.guid = attr_view[ReparsePoint._REPR.size:ReparsePoint._REPR.size+16].tobytes()
-    #         self.data = attr_view[ReparsePoint._REPR.size+len(self.guid):].tobytes()
-
     @classmethod
     def create_from_binary(cls, binary_view):
         content = cls._REPR.unpack(binary_view[:cls._REPR.size])
