@@ -1,3 +1,43 @@
+'''
+#TODO
+-Definition of the API
+This module is reponsible for the main parts that are exposed to the calling application.
+
+- Structure of the API
+
+The MFT has a number of different entries of type MFTEntry, these entries
+have a header (MFTHeader) and a 'n' number of attributes and the attributes
+have a header and a content. A rough of diagram can be seen below:
+
++-----+
+| MFT |
++--+--+
+   |     +----------+
+   +-----+ MFTEntry |          +--------+
+   |     +----------+    +-----+ Header |
+   |     +----------+    |     +--------+          +--------+
+   +-----+ MFTEntry +----+                      +--+ Header |
+   |     +----------+    |      +------------+  |  +--------+
+   |          X          +------+ Attributes +--+
+   |                     |      +------------+  |  +---------+
+   |          X          |            X         +--+ Content |
+   |                     |                         +---------+
+   |          X          |            X
+   |                     |
+   |     +----------+    |      +------------+
+   +-----+ MFTEntry |    +------+ Attributes |
+         +----------+           +------------+
+
+-- MFT - Represents the MFT
+-- MFTEntry - Represents one entry from the logical perspective, i.e., even if
+    the attributes are spread across multiple entry in the file, they will be
+    organized under the base entry
+-- MFTHeader - Represents the header of the MFT entry
+-- Attribute - Represents one attribute
+-- AttributeHeader - Represents the header of the attribute, including if it is
+    resident or non-resident
+-- The content depends on the type of attribute
+'''
 import struct
 import enum
 import collections
@@ -22,7 +62,7 @@ class Attribute():
         self.header = AttributeHeader(bin_view)
         self.content = None #content will be available only if the attribute is resident
 
-        if not self.header.is_non_resident:
+        if not self.header.non_resident:
             offset = self.header.resident_header.content_offset
             length = self.header.resident_header.content_len
 
@@ -54,13 +94,11 @@ class Attribute():
                 #print(self.header.attr_type_id)
                 #TODO log/error when we don't know how to treat an attribute
                 pass
-        else:
-            self.content = None
 
     def is_non_resident(self):
         '''Helper function to check if an attribute is resident or not. Returns
         True if it is resident, otherwise returns False'''
-        return self.header.is_non_resident
+        return self.header.non_resident
 
     def __len__(self):
         return len(self.header)
@@ -79,41 +117,39 @@ class MFTEntry():
     can be parsed referencing the base entry.
     '''
     #TODO test carefully how to find the correct index entry, specially with NTFS versions < 3
-    def __init__(self, bin_stream, entry_number):
+    def __init__(self, header=None, attrs=None, slack=None):
         '''Expects a writeable array with support to memoryview. Normally
         this would be a bytearray type. Once it has that, it reads the MFT
         and the necessary attributes. This read exactly one entry. Also,
         just to make sure the MFT entry number.
         '''
-        self.header = None
-        self.attrs = {}
-        self.slack = None
+        self.header, self.attrs, self.slack = header, attrs, slack
 
-        bin_view = memoryview(bin_stream)
-        attrs_view = None
+    @classmethod
+    def create_from_binary(cls, mft_config, binary_data, entry_number):
+        bin_view = memoryview(binary_data)
+        entry = None
 
-        #TODO better definition of an "empty" entry
-        #TODO move this check to a upper layer?
-        #TODO in case of a empty entry, what is the best way to proceed? None?
-        if bin_stream[0:4] != b"\x00\x00\x00\x00": #test if the entry is empty
-            self.header = MFTHeader(bin_view[:MFTHeader.get_header_size()])
-            if self.header.mft_record != entry_number:
-                #TODO mft_record is something that showed up only in XP, maybe it is better to overwrite here? Needs testing
-                logging.warning(f"The MFT entry number doesn't match. {entry_number} != {self.header_mft_record}")
-            if len(bin_stream) != self.header.entry_alloc_len:
-                logging.error(f"Expected MFT size is different than entry size.")
+        if bin_view[0:4] != b"\x00\x00\x00\x00": #test if the entry is empty
+            header = MFTHeader(bin_view[:MFTHeader.get_header_size()])
+            entry = cls(header, {})
+
+            if header.mft_record != entry_number:
+                MOD_LOGGER.warning(f"The MFT entry number doesn't match. {entry_number} != {self.header_mft_record}")
+            if len(binary_data) != header.entry_alloc_len:
+                MOD_LOGGER.error(f"Expected MFT size is different than entry size.")
                 raise MFTEntryException("Expected MFT size is different than entry size.", entry_number)
-            apply_fixup_array(bin_view, self.header.fx_offset,
-                self.header.fx_count, self.header.entry_alloc_len)
-            attrs_view = bin_view[self.header.first_attr_offset:]
-            #TODO have a "attribute parser" and a dispatcher?
-            self._load_attributes(attrs_view)
-            self.slack = bin_view[self.header.entry_len:].tobytes()
-        else:
-            logging.debug(f"Entry {entry_number} is empty.")
-            self.attrs = None
+            apply_fixup_array(bin_view, header.fx_offset, header.fx_count, header.entry_alloc_len)
 
+            if mft_config["load_attributes"]:
+                entry._load_attributes(bin_view[header.first_attr_offset:])
+            if mft_config["load_slack"]:
+                entry.slack = bin_view[header.entry_len:].tobytes()
+        else:
+            MOD_LOGGER.debug(f"Entry {entry_number} is empty.")
         bin_view.release() #release the underlying buffer
+
+        return entry
 
     def _add_attribute(self, attr):
         '''Adds one attribute to the list of attributes. Checks if the the entry
@@ -136,7 +172,9 @@ class MFTEntry():
             self._add_attribute(attr)
             offset += len(attr)
 
-    #def _get_entries_from_attr_list(self)
+
+
+
 
     def is_empty(self):
         if self.header is None and self.attrs is None:
@@ -205,6 +243,8 @@ class MFT():
     '''This class represents a MFT file. It has a bunch of MFT entries
     that have been parsed
     '''
+    mft_config = {"load_attributes" : True,
+                  "load_slack" : True}
 
     def __init__(self, file_pointer, size=0, use_cores=1):
         '''The initialization process takes a file like object "file_pointer"
@@ -234,9 +274,10 @@ class MFT():
         data_buffer = bytearray(self.mft_entry_size)
         for i in range(0, end):
             file_pointer.readinto(data_buffer)
-            entry = MFTEntry(data_buffer, i)
+            entry = MFTEntry.create_from_binary(MFT.mft_config, data_buffer, i)
 
-            if not entry.is_empty():
+            #if not entry.is_empty():
+            if entry is not None:
                 self.entries.append(entry)
 
                 #we have a problem. If the entry has a non-resident ATTRIBUTE_LIST,
@@ -245,7 +286,7 @@ class MFT():
                 #this mapping
                 attr_list = entry.get_attributes(AttrTypes.ATTRIBUTE_LIST)
                 if attr_list is not None:
-                    if len(attr_list) == 1 and attr_list[0].header.is_non_resident:
+                    if len(attr_list) == 1 and attr_list[0].is_non_resident():
                         temp_entry_n_attr_list_nr.add(i)
                     elif len(attr_list) > 1:
                         #TODO error handling? is there a case of multiple attr lists?

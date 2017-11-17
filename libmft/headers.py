@@ -220,7 +220,7 @@ class AttributeHeader():
 
         self.attr_type_id = AttrTypes(temp[0])
         self.attr_len = temp[1]
-        self.is_non_resident = bool(temp[2])
+        self.non_resident = bool(temp[2])
         self.name_len = temp[3]
         self.name_offset = temp[4]
         self.flags = AttrFlags(temp[5])
@@ -232,11 +232,11 @@ class AttributeHeader():
         if self.name_len:
             self.attr_name = header_view[self.name_offset:self.name_offset+(2*self.name_len)].tobytes().decode("utf_16_le")
 
-        if self.attr_type_id in AttributeHeader._ALWAYS_RESIDENT and self.is_non_resident:
+        if self.attr_type_id in AttributeHeader._ALWAYS_RESIDENT and self.non_resident:
             MOD_LOGGER.error(f"Attribute {self.attr_type.name} must always be resident")
             raise AttrHeaderException(f"Attribute {self.attr_type.name} is always resident.")
 
-        if not self.is_non_resident:
+        if not self.non_resident:
             self.resident_header = ResidentAttrHeader._make(self._REPR_RESIDENT.unpack(header_view[self._REPR.size:self._REPR.size + self._REPR_RESIDENT.size]))
         else:
             self.non_resident_header = NonResidentAttrHeader(header_view, self._REPR.size)
@@ -264,6 +264,6 @@ class AttributeHeader():
     def __repr__(self):
         'Return a nicely formatted representation string'
         return self.__class__.__name__ + '(attr_type_id={!s}, attr_len={}, nonresident_flag={}, name_len={}, name_offset={:#06x}, flags={!s}, attr_id={}, resident_header={}, non_resident_header={}, attr_name={})'.format(
-            self.attr_type_id, self.attr_len, self.is_non_resident,
+            self.attr_type_id, self.attr_len, self.non_resident,
             self.name_len, self.name_offset, self.flags, self.attr_id,
             self.resident_header, self.non_resident_header, self.attr_name)

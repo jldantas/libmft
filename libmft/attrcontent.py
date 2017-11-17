@@ -21,13 +21,16 @@ MOD_LOGGER = logging.getLogger(__name__)
 #TODO verify, in general, if it is not better to encode the data within the
 #attributes as tuple or list and use properties to access by name
 
+#TODO rewrite the commentaries
+#TODO define a consistent way of creating objects, example:
+# the constructor always expects the correct types and does no conversion
+
 #******************************************************************************
 # STANDARD_INFORMATION ATTRIBUTE
 #******************************************************************************
 class StandardInformation():
     '''Represents the STANDARD_INFORMATION converting the timestamps to
-    datetimes and the flags to FileInfoFlags representation.
-    '''
+    datetimes and the flags to FileInfoFlags representation.'''
     _REPR = struct.Struct("<4Q4I")
     _REPR_NFTS_3_EXTENSION = struct.Struct("<2I2Q")
     ''' Creation time - 8
@@ -46,8 +49,24 @@ class StandardInformation():
 
     def __init__(self, content=(None,)*12):
         '''Creates a StandardInformation object. The content has to be an iterable
-        with precisely 12 objects in order. Creation of the object from a binary
-        string/memoryview can be done using the class method 'create_from_binary'
+        with precisely 12 objects in order.
+        If content is not provided, a 12 element tuple, where all elements are
+        None is created
+
+        Args:
+            content (iterable), where:
+                [0] (datetime) - created time
+                [1] (datetime) - changed time
+                [2] (datetime) - mft change time
+                [3] (datetime) - accessed
+                [4] (FileInfoFlags) - flags
+                [5] (int) - Maximum number of versions
+                [6] (int) - Version number
+                [7] (int) - Class id
+                [8] (int) - Owner id
+                [9] (int) - Security id
+                [10] (int) - Quota charged
+                [11] (int) - Update Sequence Number
         '''
         self.timestamps = {}
 
