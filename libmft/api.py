@@ -55,10 +55,47 @@ from libmft.exceptions import MFTEntryException
 
 MOD_LOGGER = logging.getLogger(__name__)
 
+#TODO multiprocessing, see below
+'''
+A deeper study/test is necessary before implementing multiprocess.
+With the standard queue model, copies of the data have to be made
+for queue input as they will be consumed. This generates lots of memory
+allocation calls and possible pickle of the data. As the processing itself
+is not so great, mostly memory manipulation/interpretation, the amount
+of calls might fuck things up. A reasonable approach would be using
+Managers and create a "shared variables", an array with multiple buffers
+and updating the buffers as they are processed. This will require some
+fine tuning of how/when the shared buffers are accessed and might become
+too complex for maintenance. So, options:
+* Use a standard queue and create copies of data read from the file
+* Use a shared queue/list and think about a way of sync things without
+ messing it up
+* Actually parallelize the access to the file, passing each thread their
+ "limits", this might screw IO performance... badly...
+* Don't add multiprocessing and keep using a single buffer
+**!!!!!
+ * Use two queues passing buffers, once processing is done, buffer
+ is inserted in another queue and the application waits for this queue
+ to have buffer available
+
+The managers shit:
+    https://docs.python.org/3/library/multiprocessing.html?highlight=queue#multiprocessing-managers
+    https://stackoverflow.com/questions/11196367/processing-single-file-from-multiple-processes-in-python
+'''
+
 class Attribute():
     '''Represents an attribute, header and content. Independently the type of
     attribute'''
     def __init__(self, header=None, content=None):
+        '''Creates an Attribute object. The content variable is expected to be assigned
+        only in case of a resident attribute. It is recommended to use the
+        "create_from_binary" function
+
+        Args:
+            header (AttributeHeader) - The header of the attribute
+            content (Variable) - The content of the attribute. Depends on the type
+                of the attribute.
+        '''
         self.header = header
         self.content = content
 
@@ -116,24 +153,40 @@ class Attribute():
             self.header, self.content)
 
 class MFTEntry():
-    '''Represent one MFT entry. Upon creation it loads the MFT headers and
-    necessary attributes. If the entry has a slack space, it also becomes available.
-
-    As one entry can spawn multiple entries in case of lack of space, this class
-    also mantains a relation with other entries, that way, all the information
-    can be parsed referencing the base entry.
+    '''Represents one LOGICAL MFT entry. That means the entry is the base entry
+    and all the attributes that are spread across multiple physical entries are
+    aggregated in the base entry.
     '''
-    #TODO test carefully how to find the correct index entry, specially with NTFS versions < 3
+
     def __init__(self, header=None, attrs=None, slack=None):
-        '''Expects a writeable array with support to memoryview. Normally
-        this would be a bytearray type. Once it has that, it reads the MFT
-        and the necessary attributes. This read exactly one entry. Also,
-        just to make sure the MFT entry number.
+        '''Creates a MFTEntry object.
+
+        Args:
+            header (MFTHeader) - The header of the attribute
+            attrs (`list` of Attribute) - list of Attributes that are related to
+                this entry
+            slack (binary string) - the binary stream with the slack data
         '''
         self.header, self.attrs, self.slack = header, attrs, slack
 
     @classmethod
     def create_from_binary(cls, mft_config, binary_data, entry_number):
+        #TODO test carefully how to find the correct index entry, specially with NTFS versions < 3
+        '''Creates a MFTEntry from a binary stream. It correctly process
+        the binary data extracting the MFTHeader, all the attributes and the
+        slack information from the binary stream.
+
+        The binary data WILL be changed to apply the fixup array.
+
+        Args:
+            mft_config (dict) - A dictionary with the configuration with what to load
+            binary_data (bytearray) - A binary stream with the data to extract.
+                This has to be a writeable and support the memoryview call
+            entry_number (int) - The entry number for this entry
+
+        Returns:
+            MFTEntry: If the object is empty, returns None, otherwise, new object MFTEntry
+        '''
         bin_view = memoryview(binary_data)
         entry = None
 
@@ -332,36 +385,6 @@ class MFT():
                 else: #can happen when you have an orphan entry
                     self.entries[i] = entry
 
-
-
-        #TODO multiprocessing, see below
-        '''
-        A deeper study/test is necessary before implementing multiprocess.
-        With the standard queue model, copies of the data have to be made
-        for queue input as they will be consumed. This generates lots of memory
-        allocation calls and possible pickle of the data. As the processing itself
-        is not so great, mostly memory manipulation/interpretation, the amount
-        of calls might fuck things up. A reasonable approach would be using
-        Managers and create a "shared variables", an array with multiple buffers
-        and updating the buffers as they are processed. This will require some
-        fine tuning of how/when the shared buffers are accessed and might become
-        too complex for maintenance. So, options:
-        * Use a standard queue and create copies of data read from the file
-        * Use a shared queue/list and think about a way of sync things without
-         messing it up
-        * Actually parallelize the access to the file, passing each thread their
-         "limits", this might screw IO performance... badly...
-        * Don't add multiprocessing and keep using a single buffer
-        **!!!!!
-         * Use two queues passing buffers, once processing is done, buffer
-         is inserted in another queue and the application waits for this queue
-         to have buffer available
-
-        The managers shit:
-            https://docs.python.org/3/library/multiprocessing.html?highlight=queue#multiprocessing-managers
-            https://stackoverflow.com/questions/11196367/processing-single-file-from-multiple-processes-in-python
-        '''
-
     def _is_related(self, parent_entry, child_entry):
         '''This function checks if a child entry is related to the parent entry.
         This is done by comparing the reference and sequence numbers.'''
@@ -391,17 +414,13 @@ class MFT():
                     if fn.content.name_len > len(name):
                         name = fn.content.name
                         attr = fn
-
                     if not self[attr.content.parent_ref].header.usage_flags & MftUsageFlags.DIRECTORY:
                         print("PARENT IS NOT A DIRECTORY")
                         #TODO error handling
-
                     if attr.content.parent_seq != self[attr.content.parent_ref].header.seq_number: #orphan file
                         names.append(name)
                         names.append("_ORPHAN_")
                         break
-
-
                     index = attr.content.parent_ref
                     names.append(name)
             else: #some files just don't have a file name attribute
