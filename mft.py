@@ -1,6 +1,10 @@
+import copy
+
 import libmft.api
+from libmft.flagsandtypes import AttrTypes
 
 #test = "./mft_samples/MFT_singlefile.bin"
+#test = "./mft_samples/MFT_singlefileads.bin"
 #test = "./mft_samples/MFT_onefiledeleted.bin"
 #test = "./mft_samples/MFT_changed.bin"
 #test = "./mft_samples/MFT_singlefileads.bin"
@@ -17,10 +21,33 @@ test = "C:/cases/my_mft.bin"
 #test = "C:/Users/Julio/Downloads/MFT.bin"
 
 def main():
+    mft_config = copy.deepcopy(libmft.api.MFT.mft_config)
+    mft_config["load_attr_list"] = False
+    mft_config["load_oject_id"] = False
+    mft_config["load_sec_desc"] = False
+    mft_config["load_idx_root"] = False
+    mft_config["load_idx_alloc"] = False
+    mft_config["load_bitmap"] = False
+    mft_config["load_reparse"] = False
+    mft_config["load_ea_info"] = False
+    mft_config["load_ea"] = False
+    mft_config["load_log_tool_str"] = False
+
     with open(test, "rb") as mft_file:
-        mft = libmft.api.MFT(mft_file)
+        mft = libmft.api.MFT(mft_file, mft_config)
 
     print(len(mft))
+
+
+    for entry_n in mft:
+        #if mft[entry_n].has_ads() and len(mft[entry_n].get_attributes(AttrTypes.DATA)) >= 3:
+        #print(entry_n)
+        #print(mft[entry_n].is_directory(), mft.get_full_path(entry_n), mft[entry_n].get_names(), mft[entry_n].get_datastream_names())
+        print(entry_n,  mft[entry_n])
+        #print(mft[entry_n].has_ads())
+
+    #print(mft[39].get_attributes(AttrTypes.DATA))
+
     #mft.get_full_path(38941)
 
     #print(mft.get_full_path(15173))
@@ -31,18 +58,18 @@ def main():
     #         #mft._find_base_entry(i)
     #         print(i, entry.is_deleted(), mft.get_full_path(i))
 
-    i = 98126
-    print(i, mft[i].is_deleted(), mft.get_full_path(i))
-
-    stats = {}
-    for i, entry in enumerate(mft):
-        if entry is not None:
-            for key, l in entry.attrs.items():
-                if key.name not in stats:
-                    stats[key.name] = 0
-                stats[key.name] += len(l)
-
-    print(stats)
+    # i = 98126
+    # print(i, mft[i].is_deleted(), mft.get_full_path(i))
+    #
+    # stats = {}
+    # for i, entry in enumerate(mft):
+    #     if entry is not None:
+    #         for key, l in entry.attrs.items():
+    #             if key.name not in stats:
+    #                 stats[key.name] = 0
+    #             stats[key.name] += len(l)
+    #
+    # print(stats)
 
 
 

@@ -58,42 +58,49 @@ MOD_LOGGER = logging.getLogger(__name__)
 class Attribute():
     '''Represents an attribute, header and content. Independently the type of
     attribute'''
-    def __init__(self, bin_view):
-        self.header = AttributeHeader(bin_view)
-        self.content = None #content will be available only if the attribute is resident
+    def __init__(self, header=None, content=None):
+        self.header = header
+        self.content = content
 
-        if not self.header.non_resident:
-            offset = self.header.resident_header.content_offset
-            length = self.header.resident_header.content_len
+    @classmethod
+    def create_from_binary(cls, mft_config, binary_view):
+        header = AttributeHeader(binary_view)
+        content = None
 
-            if self.header.attr_type_id is AttrTypes.FILE_NAME:
-                self.content = FileName.create_from_binary(bin_view[offset:offset+length])
-            elif self.header.attr_type_id is AttrTypes.STANDARD_INFORMATION:
-                self.content = StandardInformation.create_from_binary(bin_view[offset:offset+length])
-            elif self.header.attr_type_id is AttrTypes.INDEX_ROOT:
-                self.content = IndexRoot.create_from_binary(bin_view[offset:offset+length])
-            elif self.header.attr_type_id is AttrTypes.ATTRIBUTE_LIST:
-                self.content = AttributeList.create_from_binary(bin_view[offset:offset+length])
-            elif self.header.attr_type_id is AttrTypes.DATA:
-                self.content = Data(bin_view[offset:offset+length])
-            elif self.header.attr_type_id is AttrTypes.OBJECT_ID:
-                self.content = ObjectID.create_from_binary(bin_view[offset:offset+length])
-            elif self.header.attr_type_id is AttrTypes.BITMAP:
-                self.content = Bitmap(bin_view[offset:offset+length])
-            elif self.header.attr_type_id is AttrTypes.EA_INFORMATION:
-                self.content = EaInformation(bin_view[offset:offset+length])
-            elif self.header.attr_type_id is AttrTypes.LOGGED_TOOL_STREAM:
-                self.content = LoggedToolStream(bin_view[offset:offset+length])
-            elif self.header.attr_type_id is AttrTypes.REPARSE_POINT:
-                self.content = ReparsePoint.create_from_binary(bin_view[offset:offset+length])
-            elif self.header.attr_type_id is AttrTypes.VOLUME_NAME:
-                self.content = VolumeName.create_from_binary(bin_view[offset:offset+length])
-            elif self.header.attr_type_id is AttrTypes.VOLUME_INFORMATION:
-                self.content = VolumeInformation.create_from_binary(bin_view[offset:offset+length])
+        if not header.non_resident:
+            offset = header.resident_header.content_offset
+            length = header.resident_header.content_len
+
+            if header.attr_type_id is AttrTypes.FILE_NAME and mft_config["load_file_name"]:
+                content = FileName.create_from_binary(binary_view[offset:offset+length])
+            elif header.attr_type_id is AttrTypes.STANDARD_INFORMATION and mft_config["load_std_info"]:
+                content = StandardInformation.create_from_binary(binary_view[offset:offset+length])
+            elif header.attr_type_id is AttrTypes.INDEX_ROOT and mft_config["load_idx_root"]:
+                content = IndexRoot.create_from_binary(binary_view[offset:offset+length])
+            elif header.attr_type_id is AttrTypes.ATTRIBUTE_LIST and mft_config["load_attr_list"]:
+                content = AttributeList.create_from_binary(binary_view[offset:offset+length])
+            elif header.attr_type_id is AttrTypes.DATA and mft_config["load_data"]:
+                content = Data(binary_view[offset:offset+length])
+            elif header.attr_type_id is AttrTypes.OBJECT_ID and mft_config["load_oject_id"]:
+                content = ObjectID.create_from_binary(binary_view[offset:offset+length])
+            elif header.attr_type_id is AttrTypes.BITMAP and mft_config["load_bitmap"]:
+                content = Bitmap(binary_view[offset:offset+length])
+            elif header.attr_type_id is AttrTypes.EA_INFORMATION and mft_config["load_ea_info"]:
+                content = EaInformation(binary_view[offset:offset+length])
+            elif header.attr_type_id is AttrTypes.LOGGED_TOOL_STREAM and mft_config["load_log_tool_str"]:
+                content = LoggedToolStream(binary_view[offset:offset+length])
+            elif header.attr_type_id is AttrTypes.REPARSE_POINT and mft_config["load_reparse"]:
+                content = ReparsePoint.create_from_binary(binary_view[offset:offset+length])
+            elif header.attr_type_id is AttrTypes.VOLUME_NAME and mft_config["load_vol_name"]:
+                content = VolumeName.create_from_binary(binary_view[offset:offset+length])
+            elif header.attr_type_id is AttrTypes.VOLUME_INFORMATION and mft_config["load_vol_info"]:
+                content = VolumeInformation.create_from_binary(binary_view[offset:offset+length])
             else:
                 #print(self.header.attr_type_id)
                 #TODO log/error when we don't know how to treat an attribute
                 pass
+
+        return cls(header, content)
 
     def is_non_resident(self):
         '''Helper function to check if an attribute is resident or not. Returns
@@ -142,7 +149,7 @@ class MFTEntry():
             apply_fixup_array(bin_view, header.fx_offset, header.fx_count, header.entry_alloc_len)
 
             if mft_config["load_attributes"]:
-                entry._load_attributes(bin_view[header.first_attr_offset:])
+                entry._load_attributes(mft_config, bin_view[header.first_attr_offset:])
             if mft_config["load_slack"]:
                 entry.slack = bin_view[header.entry_len:].tobytes()
         else:
@@ -159,7 +166,7 @@ class MFTEntry():
             self.attrs[attr.header.attr_type_id] = []
         self.attrs[attr.header.attr_type_id].append(attr)
 
-    def _load_attributes(self, attrs_view):
+    def _load_attributes(self, mft_config, attrs_view):
         '''This function receives a view that starts at the first attribute
         until the end of the entry
         '''
@@ -168,19 +175,14 @@ class MFTEntry():
         while (attrs_view[offset:offset+4] != b'\xff\xff\xff\xff'):
             #pass all the information to the attr, as we don't know how
             #much content the attribute has
-            attr = Attribute(attrs_view[offset:])
+            attr = Attribute.create_from_binary(mft_config, attrs_view[offset:])
             self._add_attribute(attr)
             offset += len(attr)
 
-
-
-
-
-    def is_empty(self):
-        if self.header is None and self.attrs is None:
-            return True
-        else:
-            return False
+    def copy_attributes(self, source_entry):
+        for key, list_attr in source_entry.attrs.items():
+            for attr in list_attr:
+                self._add_attribute(attr)
 
     def get_attributes(self, attr_type):
         '''Returns a list with one or more attributes of type "attr_type", in
@@ -190,29 +192,57 @@ class MFTEntry():
         else:
             return None
 
-    def find_related_records(self):
-        #TODO Change function name
-        '''Returns the related entries to this entry. This means three things:
-        1) The entry itself is always returned (who is more related than the entry itself?)
-        2) If the entry has a base_record, it is returned
-        3) If the entry is a base entry and has an resident ATTRIBUTE_LIST, it
-        will parse the appropriate values and return
+    def get_data_size(self, ads_name=None):
+        '''Returns the size of the data or an ads. The ads has to be the name of the file'''
+        data_attrs = self.get_attributes(AttrTypes.DATA)
+        data_size = 0
 
-        It does NOT matter if the entry is not in use.'''
-        records = [self.header.mft_record]
+        if data_attrs is not None:
+            #select the correct attributes of the file
+            if ads_name is None:
+                relevant_attr = [a for a in data_attrs if a.header.attr_name is None]
+            else:
+                relevant_attr = [a for a in data_attrs if a.header.attr_name == ads_name]
+            #once we the right attributes, process and find the size
+            for attr in relevant_attr:
+                if attr.is_non_resident():
+                    if not attr.header.non_resident_header.start_vcn:
+                        data_size = attr.header.non_resident_header.curr_sstream
+                        break
+                else:
+                    data_size = len(attr.content)
+                    break
 
-        if not self.header.base_record_ref: #if we are dealing with a base record, it might have an attribute_list
-            attr_list = self.get_attributes(AttrTypes.ATTRIBUTE_LIST)
-            if attr_list is not None:
-                #TODO confirm if this is true
-                #we assume that there can be only one ATTRIBUTE_LIST per entry
-                attr = attr_list[0]
-                if not attr.is_non_resident():
-                    records += [list_entry.file_ref for list_entry in attr.content if list_entry.attr_type is AttrTypes.FILE_NAME]
+        return data_size
+
+    def get_datastream_names(self):
+        ads_names = set()
+
+        data_attrs = self.get_attributes(AttrTypes.DATA)
+        if data_attrs is not None:
+            for data_attr in data_attrs:
+                ads_names.add(data_attr.header.attr_name)
+
+        return(ads_names)
+
+    def has_ads(self):
+        data_attrs = self.get_attributes(AttrTypes.DATA)
+        if data_attrs is not None:
+            for a in data_attrs:
+                if a.header.attr_name:
+                    return True
+            return False
         else:
-            records.append(self.header.base_record_ref)
+            return False
 
-        return records
+    def get_names(self):
+        names = set()
+
+        attrs = self.get_attributes(AttrTypes.FILE_NAME)
+        if attrs is not None:
+            names = {attr.content.name for attr in attrs}
+
+        return names
 
     def is_deleted(self):
         if self.header.usage_flags & MftUsageFlags.IN_USE:
@@ -220,18 +250,11 @@ class MFTEntry():
         else:
             return True
 
-    # def get_file_size(self):
-    #     #TODO this is not a good name. change it.
-    #     #TODO get ADSs sizes as well
-    #     if AttrTypes.DATA in self.attrs:
-    #         ret = [(attr.header.attr_name, len(attr.content)) for attr in self.attrs[AttrTypes.DATA] if not (attr.header.attr_name is None and len(attr.content) == 0 and attr.content is None)]
-    #         if not ret:
-    #             ret = (None, 0)
-    #     else:
-    #         #TODO error handling? what is the best way to comunicate that directories have no size
-    #         ret = (None, 0)
-    #
-    #     return ret
+    def is_directory(self):
+        if self.header.usage_flags & MftUsageFlags.DIRECTORY:
+            return True
+        else:
+            return False
 
     def __repr__(self):
         'Return a nicely formatted representation string'
@@ -243,71 +266,73 @@ class MFT():
     '''This class represents a MFT file. It has a bunch of MFT entries
     that have been parsed
     '''
-    mft_config = {"load_attributes" : True,
-                  "load_slack" : True}
+    mft_config = {"entry_size" : 0,
+                  "load_attributes" : True,
+                  "load_slack" : True,
+                  "load_std_info" : True,
+                  "load_attr_list" : True,
+                  "load_file_name" : True,
+                  "load_oject_id" : True,
+                  "load_sec_desc" : True,
+                  "load_vol_name" : True,
+                  "load_vol_info" : True,
+                  "load_data" : True,
+                  "load_idx_root" : True,
+                  "load_idx_alloc" : True,
+                  "load_bitmap" : True,
+                  "load_reparse" : True,
+                  "load_ea_info" : True,
+                  "load_ea" : True,
+                  "load_log_tool_str" : True
+                  }
 
-    def __init__(self, file_pointer, size=0, use_cores=1):
+    def __init__(self, file_pointer, mft_config=None):
         '''The initialization process takes a file like object "file_pointer"
         and loads it in the internal structures. "use_cores" can be definied
         if multiple cores are to be used. The "size" argument is the size
         of the MFT entries. If not provided, the class will try to auto detect
         it.
         '''
-        self.mft_entry_size = size
-        self.entries = []
-        #this is a dictiony of lists, where the key is the parent number and
-        #the members of the list are the related entries
-        self.related_entries_nr = {}
-
-        data_buffer = 0
-        temp_entry_n_attr_list_nr = set()
+        self.mft_config = mft_config if mft_config is not None else MFT.mft_config
+        self.mft_entry_size = self.mft_config["entry_size"]
+        self.entries = {}
 
         if not self.mft_entry_size:
             self.mft_entry_size = self._find_mft_size(file_pointer)
-        #TODO test and verify what happens with really big files? overflow?
-        file_pointer.seek(0, 2)
-        end = int(file_pointer.tell() / self.mft_entry_size)
-        if (file_pointer.tell() % self.mft_entry_size):
+        file_size = self._get_file_size(file_pointer)
+        if (file_size % self.mft_entry_size):
             #TODO error handling (file size not multiple of mft size)
-            print("FILE SIZE NOT MULITPLE OF MFT ENTRY SIZE, POSSIBLE PROBLEM")
-        file_pointer.seek(0, 0)
+            MOD_LOGGER.error("Unexpected file size. It is not multiple of the MFT entry size.")
+
+        end = int(file_size / self.mft_entry_size)
         data_buffer = bytearray(self.mft_entry_size)
+        temp_entries = []
         for i in range(0, end):
             file_pointer.readinto(data_buffer)
-            entry = MFTEntry.create_from_binary(MFT.mft_config, data_buffer, i)
+            entry = MFTEntry.create_from_binary(self.mft_config, data_buffer, i)
 
-            #if not entry.is_empty():
             if entry is not None:
-                self.entries.append(entry)
+                if not entry.header.base_record_ref:
+                    self.entries[i] = entry
+                else:
+                    base_record_ref = entry.header.base_record_ref
+                    if base_record_ref in self.entries: #if the parent entry has been loaded
+                        if self._is_related(self.entries[base_record_ref], entry):
+                            self.entries[base_record_ref].copy_attributes(entry)
+                        else: #can happen when you have an orphan entry
+                            self.entries[i] = entry
+                    else: #if the parent entry has not been loaded, put the entry in a temporary container
+                        temp_entries.append(entry)
+        #process the temporary list and add it to the "model"
+        for entry in temp_entries:
+            base_record_ref = entry.header.base_record_ref
+            if base_record_ref in self.entries: #if the parent entry has been loaded
+                if self._is_related(self.entries[base_record_ref], entry):
+                    self.entries[base_record_ref].copy_attributes(entry)
+                else: #can happen when you have an orphan entry
+                    self.entries[i] = entry
 
-                #we have a problem. If the entry has a non-resident ATTRIBUTE_LIST,
-                #it is impossible to find the entries based on the base record.
-                #as such, in those cases, we cheat. Create a structure that allows
-                #this mapping
-                attr_list = entry.get_attributes(AttrTypes.ATTRIBUTE_LIST)
-                if attr_list is not None:
-                    if len(attr_list) == 1 and attr_list[0].is_non_resident():
-                        temp_entry_n_attr_list_nr.add(i)
-                    elif len(attr_list) > 1:
-                        #TODO error handling? is there a case of multiple attr lists?
-                        pass
-            else:
-                self.entries.append(None)
 
-        self._fix_related_attr_list_non_resident(temp_entry_n_attr_list_nr)
-
-
-        # base = 0
-        # non_base = 0
-        # for i, entry in enumerate(self.entries):
-        #     if entry is not None:
-        #         if entry.header.base_record_ref:
-        #             non_base += 1
-        #         else:
-        #             base += 1
-        # print(f"base {base}, non-base {non_base}")
-        #print(self.related_entries_nr)
-        #print(self.related_entries_nr)
 
         #TODO multiprocessing, see below
         '''
@@ -346,93 +371,39 @@ class MFT():
         else:
             return False
 
-    def _fix_related_attr_list_non_resident(self, temp_entry_n_attr_list_nr):
-        '''This function is a cheat. When we have an entry that has an
-        ATTRIBUTE_LIST as non-resident, it is impossible to find the relation
-        between entries.
-        To fix this problem, this function receives an iterable with all the entries
-        that have a non-resident ATTRIBUTE_LIST and search the other entries
-        checking for which ones have reference to the ones flagged.
-        Once it has been found, it puts the information in the variable
-        self.related_entries_nr.
-        '''
-        #TODO test if this works and/or is worth
-        for i, entry in enumerate(self.entries):
-            if entry is not None:
-                base_record_ref = entry.header.base_record_ref
-                if base_record_ref in temp_entry_n_attr_list_nr and self._is_related(self[base_record_ref], self[i]):
-                    if base_record_ref not in self.related_entries_nr:
-                        self.related_entries_nr[base_record_ref] = set()
-                    self.related_entries_nr[base_record_ref].add(i)
-
-    def _find_base_entry(self, entry_number):
-        '''Find the base entry of an entry. NTFS allows only a relationship of
-        one level. If we have something more is because we might have a deleted
-        entry messing up.
-
-        In case of the entry is a base entry, it will return the entry number That
-        was provided
-        '''
-        entry = self[entry_number]
-
-        if not entry.header.base_record_ref:
-            return entry_number
-        else:
-            if self._is_related(self[entry.header.base_record_ref], entry):
-                return entry.header.base_record_ref
-            else: #if the entries are not related, we have an error, probably because of a deleted entry
-                #TODO error handling
-                pass
-
-
-    def _get_related_entries(self, entry_number):
-        #TODO test if entry referenced by entry_number is None?
-        parent_entry_number = self._find_base_entry(entry_number)
-        data = []
-
-        if parent_entry_number in self.related_entries_nr:
-            data.append(self.related_entries_nr[parent_entry_number])
-        data += self[parent_entry_number].find_related_records()
-
-        return data
-
     def get_full_path(self, entry_number):
         #TODO ADS
-        curr_entry_number = entry_number
+        index = entry_number
         names = []
-        temp_name = ""
-        temp_attr = None
+        name, attr = "", None
         root_id = 5
-        parent = 0
+        #parent = 0
 
         if self[entry_number] is None:
             return None
 
-        while parent != root_id:
-            fn_attrs = []
+        while index != root_id:
+            fn_attrs = self[index].get_attributes(AttrTypes.FILE_NAME)
 
-            numbers = set(self._get_related_entries(curr_entry_number))
-            fn_attrs = [self[n].get_attributes(AttrTypes.FILE_NAME) for n in numbers if self[n] is not None]
+            name, attr = "", None
+            if fn_attrs is not None:
+                for fn in fn_attrs:
+                    if fn.content.name_len > len(name):
+                        name = fn.content.name
+                        attr = fn
 
-            if fn_attrs:
-                for attr in itertools.chain.from_iterable(fn_attrs):
-                    #print(attr)
-                    if attr.content.name_len > len(temp_name):
-                        temp_attr = attr
-                        temp_name = attr.content.name
+                    if not self[attr.content.parent_ref].header.usage_flags & MftUsageFlags.DIRECTORY:
+                        print("PARENT IS NOT A DIRECTORY")
+                        #TODO error handling
 
-                #print(temp_attr)
-                if temp_attr.content.parent_seq != self[temp_attr.content.parent_ref].header.seq_number: #orphan file
-                    names.append(temp_name)
-                    names.append("_ORPHAN_")
-                    break
-                    #TODO exception?
+                    if attr.content.parent_seq != self[attr.content.parent_ref].header.seq_number: #orphan file
+                        names.append(name)
+                        names.append("_ORPHAN_")
+                        break
 
-                parent = temp_attr.content.parent_ref
-                #print(curr_entry_number, parent, temp_attr.content.parent_ref)
-                curr_entry_number = parent
-                names.append(temp_name)
-                temp_name = ""
+
+                    index = attr.content.parent_ref
+                    names.append(name)
             else: #some files just don't have a file name attribute
                 #TODO throw an exception?
                 #TODO logging
@@ -440,18 +411,15 @@ class MFT():
 
         return "\\".join(reversed(names))
 
+    def __iter__(self):
+        for key in self.entries:
+            yield key
+        #return self.entries.values()
+
     def __getitem__(self, index):
         '''Return the specific MFT entry. In case of an empty MFT, it will return
         None'''
-        entry = self.entries[index]
-
-        return entry
-
-        # if entry is not None:
-        #     return entry
-        # else:
-        #     raise Exception
-        #     pass
+        return self.entries[index]
 
     def __len__(self):
         return len(self.entries)
@@ -474,3 +442,10 @@ class MFT():
         file_object.seek(0)
 
         return size
+
+    def _get_file_size(self, file_object):
+        file_object.seek(0, 2)
+        file_size = file_object.tell()
+        file_object.seek(0, 0)
+
+        return file_size
