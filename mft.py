@@ -20,6 +20,16 @@ from libmft.flagsandtypes import AttrTypes
 test = "C:/cases/my_mft.bin"
 #test = "C:/Users/Julio/Downloads/MFT.bin"
 
+def stress_filename(mft_config):
+    sample = "./mft_samples/stress_filename.bin"
+
+    with open(sample, "rb") as mft_file:
+        mft = libmft.api.MFT(mft_file, mft_config)
+
+    print("MFT length:", len(mft))
+    for entry_n in mft:
+        print(entry_n, mft[entry_n].is_directory(), mft.get_full_path(entry_n), mft[entry_n].get_names(), mft[entry_n].get_datastream_names())
+
 def main():
     mft_config = copy.deepcopy(libmft.api.MFT.mft_config)
     mft_config["load_attr_list"] = False
@@ -33,18 +43,22 @@ def main():
     mft_config["load_ea"] = False
     mft_config["load_log_tool_str"] = False
 
+    #stress_filename(mft_config)
+
+
     with open(test, "rb") as mft_file:
-        mft = libmft.api.MFT(mft_file, mft_config)
-
-    print(len(mft))
-
-
+        #mft = libmft.api.MFT(mft_file, mft_config)
+        mft = libmft.api.MFT(mft_file)
+    #
+    #
+    #
+    #
     for entry_n in mft:
-        #if mft[entry_n].has_ads() and len(mft[entry_n].get_attributes(AttrTypes.DATA)) >= 3:
-        #print(entry_n)
-        #print(mft[entry_n].is_directory(), mft.get_full_path(entry_n), mft[entry_n].get_names(), mft[entry_n].get_datastream_names())
-        print(entry_n,  mft[entry_n])
-        #print(mft[entry_n].has_ads())
+    #     #if mft[entry_n].has_ads() and len(mft[entry_n].get_attributes(AttrTypes.DATA)) >= 3:
+    #     #print(entry_n)
+        print(entry_n, mft[entry_n].is_directory(), mft.get_full_path(entry_n), mft[entry_n].get_names(), mft[entry_n].get_datastream_names())
+    #     #print(entry_n,  mft[entry_n])
+    #     #print(mft[entry_n].has_ads())
 
     #print(mft[39].get_attributes(AttrTypes.DATA))
 

@@ -2,7 +2,8 @@ from setuptools import setup
 
 setup(
     name = "libmft",
-    version = "0.2",
+    version = "0.5",
+    author = "Julio Dantas"
     description = "A pure python library to parse MFT entries",
     url = "https://github.com/jldantas/libmft",
     license = "BSD 3-Clause",

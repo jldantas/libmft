@@ -22,8 +22,6 @@ MOD_LOGGER = logging.getLogger(__name__)
 #attributes as tuple or list and use properties to access by name
 
 #TODO rewrite the commentaries
-#TODO define a consistent way of creating objects, example:
-# the constructor always expects the correct types and does no conversion
 
 #******************************************************************************
 # STANDARD_INFORMATION ATTRIBUTE
@@ -49,9 +47,9 @@ class StandardInformation():
 
     def __init__(self, content=(None,)*12):
         '''Creates a StandardInformation object. The content has to be an iterable
-        with precisely 12 objects in order.
+        with precisely 12 elements in order.
         If content is not provided, a 12 element tuple, where all elements are
-        None is created
+        None, is the default argument
 
         Args:
             content (iterable), where:
@@ -75,48 +73,75 @@ class StandardInformation():
         self.flags, self.max_n_ver, self.ver_n, self.class_id, self.owner_id, \
         self.security_id, self.quota_charged, self.usn = content
 
-        if self.flags is not None: #we might have an "empty" oject, so convert only if it is valid
-            #flags and timestaps have specific format, so we convert them
-            self.timestamps["created"] = convert_filetime(self.timestamps["created"])
-            self.timestamps["changed"] = convert_filetime(self.timestamps["changed"])
-            self.timestamps["mft_change"] = convert_filetime(self.timestamps["mft_change"])
-            self.timestamps["accessed"] = convert_filetime(self.timestamps["accessed"])
-            self.flags = FileInfoFlags(self.flags)
-
     @classmethod
-    def get_content_size(cls):
-        '''Return the size of the STANDARD_INFORMATION content, always considering
-        a NFTS version >3.'''
+    def get_static_content_size(cls):
+        '''Returns the static size of the content never taking in consideration
+        variable fields, for example, names.
+
+        Returns:
+            int: The size of the content, in bytes
+        '''
         return cls._REPR.size + cls._REPR_NFTS_3_EXTENSION.size
 
     @classmethod
     def create_from_binary(cls, binary_view):
+        '''Creates a new object StandardInformation from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray.
+
+        Args:
+            binary_view (memoryview of bytearray) - A binary stream with the
+                information of the attribute
+
+        Returns:
+            StandardInformation: New object using hte binary stream as source
+        '''
         main_content = cls._REPR.unpack(binary_view[:cls._REPR.size])
         if len(binary_view) != cls._REPR.size:
             ntfs3_extension = cls._REPR_NFTS_3_EXTENSION.unpack(binary_view[cls._REPR.size:])
         else:
             ntfs3_extension = (None, None, None, None)
+        #create the new object with "raw types"
+        nw_obj = cls(_chain(main_content, ntfs3_extension))
+        #update the object converting to the correct types
+        nw_obj.timestamps["created"] = convert_filetime(nw_obj.timestamps["created"])
+        nw_obj.timestamps["changed"] = convert_filetime(nw_obj.timestamps["changed"])
+        nw_obj.timestamps["mft_change"] = convert_filetime(nw_obj.timestamps["mft_change"])
+        nw_obj.timestamps["accessed"] = convert_filetime(nw_obj.timestamps["accessed"])
+        nw_obj.flags = FileInfoFlags(nw_obj.flags)
 
-        return cls(_chain(main_content, ntfs3_extension))
+        return nw_obj
 
     def get_created_time(self):
-        '''Return the created time. This function provides the same information
-        as using <variable>.timestamps["created"]'''
+        '''Returns the created time. This function provides the same information
+        as using <variable>.timestamps["created"].
+
+        Returns:
+            datetime: The created time'''
         return self.timestamps["created"]
 
     def get_changed_time(self):
-        '''Return the changed time. This function provides the same information
-        as using <variable>.timestamps["changed"]'''
+        '''Returns the changed time. This function provides the same information
+        as using <variable>.timestamps["changed"].
+
+        Returns:
+            datetime: The changed time'''
         return self.timestamps["changed"]
 
     def get_mftchange_time(self):
-        '''Return the mft change time. This function provides the same information
-        as using <variable>.timestamps["mft_change"]'''
+        '''Returns the mft change time. This function provides the same information
+        as using <variable>.timestamps["mft_change"].
+
+        Returns:
+            datetime: The mft change time'''
         return self.timestamps["mft_change"]
 
     def get_accessed_time(self):
-        '''Return the accessed time. This function provides the same information
-        as using <variable>.timestamps["accessed"]'''
+        '''Returns the accessed time. This function provides the same information
+        as using <variable>.timestamps["accessed"].
+
+        Returns:
+            datetime: The accessed time'''
         return self.timestamps["accessed"]
 
     def __repr__(self):
@@ -142,18 +167,26 @@ class AttributeListEntry():
         Name (unicode) - variable
     '''
 
-    def __init__(self, content=(None,)*8):
-        '''Creates a AttributeListEntry object. The content has to be an iterable
-        with precisely 8 objects in order. Creation of the object from a binary
-        string/memoryview can be done using the class method 'create_from_binary'''
-        self.attr_type, self.entry_len, name_len, self.name_offset, \
-        self.start_vcn, file_coded_reference, self.attr_id, self.name = content
+    def __init__(self, content=(None,)*9):
+        '''Creates an AttributeListEntry object. The content has to be an iterable
+        with precisely 9 elements in order.
+        If content is not provided, a tuple filled with 'None' is the default
+        argument.
 
-        if self.attr_type is not None:
-            self.attr_type = AttrTypes(self.attr_type)
-            self.file_ref, self.file_seq = get_file_reference(file_coded_reference)
-        else:
-            self.file_ref, self.file_seq = None, None
+        Args:
+            content (iterable), where:
+                [0] (AttrTypes) - Attribute type
+                [1] (int) - length of the entry
+                [2] (int) - length of the name
+                [3] (int) - offset to the name
+                [4] (int) - start vcn
+                [5] (int) - file reference number
+                [6] (int) - file sequence number
+                [7] (int) - attribute id
+                [8] (str) - name
+        '''
+        self.attr_type, self.entry_len, name_len, self.name_offset, \
+        self.start_vcn, self.file_ref, self.file_seq, self.attr_id, self.name = content
 
     def _get_name_length(self):
         '''Returns the length of the name based on the name'''
@@ -162,18 +195,46 @@ class AttributeListEntry():
         else:
             return len(self.name)
 
-    #the name length can derived from the name, so, we don't need to keep in memory
-    name_len = property(_get_name_length, doc='Length of the name')
+    @classmethod
+    def get_static_content_size(cls):
+        '''Returns the static size of the content never taking in consideration
+        variable fields, for example, names.
+
+        Returns:
+            int: The size of the content, in bytes
+        '''
+        return cls._REPR.size
 
     @classmethod
     def create_from_binary(cls, binary_view):
+        '''Creates a new object AttributeListEntry from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray.
+
+        Args:
+            binary_view (memoryview of bytearray) - A binary stream with the
+                information of the attribute
+
+        Returns:
+            AttributeListEntry: New object using hte binary stream as source
+        '''
         content = cls._REPR.unpack(binary_view[:cls._REPR.size])
+        nw_obj = cls()
+
         if content[2]:
             name = binary_view[content[3]:content[3]+(2*content[2])].tobytes().decode("utf_16_le")
         else:
             name = None
+        file_ref, file_seq = get_file_reference(content[5])
+        nw_obj.attr_type, nw_obj.entry_len, nw_obj.name_offset, nw_obj.start_vcn,  \
+        nw_obj.file_ref, nw_obj.file_seq, nw_obj.attr_id, nw_obj.name = \
+        AttrTypes(content[0]), content[1], content[3], content[4], \
+        file_ref, file_seq, content[6], name
 
-        return cls(_chain(content, (name,)))
+        return nw_obj
+
+    #the name length can derived from the name, so, we don't need to keep in memory
+    name_len = property(_get_name_length, doc='Length of the name')
 
     def __len__(self):
         '''Returns the size of the entry, in bytes'''

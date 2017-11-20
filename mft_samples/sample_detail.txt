@@ -1,0 +1,18 @@
+###############################################################################
+stress_filename.bin
+###############################################################################
+*OBJECTIVE
+Stress the filename attribute, using short names, different encoding, long names
+etc.
+
+*DETAILS
+- Formated around 2017-11-20 11:53, Windows 10
+- Two files automatically created:. RemovedMediaAccessUtility.exe and
+  RemovedMediaAccessUtilityC.dmg
+- Files list in the sample
+    short.txt
+    realllllllllylongfilewithasciionlycharacters.txt
+    áéílasjdfç#$% 098123{}.txt
+    1á.txt
+    これはストレステストと同じです.txt
+    kasjdfo93u 1092i31xkj 98usafd(!^!^(&@^(#&$#&%.txt

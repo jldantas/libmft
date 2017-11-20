@@ -51,7 +51,7 @@ from libmft.attrcontent import StandardInformation, FileName, IndexRoot, Data, \
     EaInformation, LoggedToolStream
 from libmft.headers import MFTHeader, ResidentAttrHeader, NonResidentAttrHeader,  \
     AttributeHeader, DataRuns
-from libmft.exceptions import MFTEntryException
+from libmft.exceptions import MFTEntryException, FixUpError
 
 MOD_LOGGER = logging.getLogger(__name__)
 
@@ -199,7 +199,12 @@ class MFTEntry():
             if len(binary_data) != header.entry_alloc_len:
                 MOD_LOGGER.error(f"Expected MFT size is different than entry size.")
                 raise MFTEntryException("Expected MFT size is different than entry size.", entry_number)
-            apply_fixup_array(bin_view, header.fx_offset, header.fx_count, header.entry_alloc_len)
+            try:
+                apply_fixup_array(bin_view, header.fx_offset, header.fx_count, header.entry_alloc_len)
+            except FixUpError as e:
+                e.update_entry_binary(binary_data)
+                e.update_entry_number(entry_number)
+                raise
 
             if mft_config["load_attributes"]:
                 entry._load_attributes(mft_config, bin_view[header.first_attr_offset:])
@@ -408,21 +413,22 @@ class MFT():
         while index != root_id:
             fn_attrs = self[index].get_attributes(AttrTypes.FILE_NAME)
 
-            name, attr = "", None
             if fn_attrs is not None:
+                name, attr = "", None
                 for fn in fn_attrs:
                     if fn.content.name_len > len(name):
                         name = fn.content.name
                         attr = fn
-                    if not self[attr.content.parent_ref].header.usage_flags & MftUsageFlags.DIRECTORY:
-                        print("PARENT IS NOT A DIRECTORY")
-                        #TODO error handling
-                    if attr.content.parent_seq != self[attr.content.parent_ref].header.seq_number: #orphan file
-                        names.append(name)
-                        names.append("_ORPHAN_")
-                        break
-                    index = attr.content.parent_ref
+
+                if not self[attr.content.parent_ref].header.usage_flags & MftUsageFlags.DIRECTORY:
+                    print("PARENT IS NOT A DIRECTORY")
+                    #TODO error handling
+                if attr.content.parent_seq != self[attr.content.parent_ref].header.seq_number: #orphan file
                     names.append(name)
+                    names.append("_ORPHAN_")
+                    break
+                index = attr.content.parent_ref
+                names.append(name)
             else: #some files just don't have a file name attribute
                 #TODO throw an exception?
                 #TODO logging
