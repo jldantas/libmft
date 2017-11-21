@@ -9,7 +9,7 @@ import logging
 
 from libmft.flagsandtypes import AttrTypes, MftSignature, AttrFlags, MftUsageFlags
 from libmft.util.functions import get_file_reference
-from libmft.exceptions import MFTHeaderException, AttrHeaderException
+from libmft.exceptions import HeaderError, AttrHeaderException
 
 MOD_LOGGER = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ class MFTHeader():
     '''Represent the MFT header present in all MFT entries.'''
     #TODO create a way of dealing with XP only artefacts
     _REPR = struct.Struct("<4s2HQ4H2IQH2xI")
-    ''' Signature - 4 = FILE or BAAD or INDX
+    ''' Signature - 4 = FILE or BAAD
         Fix Up Array offset - 2
         Fix Up Count - 2
         Log file sequence # (LSN) - 8
@@ -29,59 +29,132 @@ class MFTHeader():
         Usage flags - 2 (MftUsageFlags)
         MFT record logical size - 4 (in bytes)
         MFT record physical size - 4 (in bytes)
-        Parent directory record # - 8
+        Base record # - 8
         Next attribute ID - 2 (xp only?)
         Padding  - 2 (xp only?)
         MFT record # - 4 (xp only?)
     '''
+    def __init__(self, header=(None,)*14):
+        '''Creates a MFTHeader object. The content has to be an iterable
+        with precisely 14 elements in order.
+        If content is not provided, a tuple filled with 'None' is the default
+        argument.
 
-    def __init__(self, header_view):
-        '''Creates an object of MFTHeader. Expects the bytes ("header_view")
-        that compose the entry, with the correct size'''
-        temp = self._REPR.unpack(header_view)
+        Args:
+            content (iterable), where:
+                [0] (bool) - does the entry has 'baad' signature?
+                [1] (int) - offset to fixup array
+                [2] (int) - number of elements in the fixup array
+                [3] (int) - Log file sequence # (LSN)
+                [4] (int) - sequence number
+                [5] (int) - hard link count
+                [6] (int) - offset to the first attribute
+                [7] (MftUsageFlags) - usage flags
+                [8] (int) - entry length (in bytes)
+                [9] (int) - allocated size of the entry (in bytes)
+                [10] (int) - base record reference
+                [11] (int) - base record sequence
+                [12] (int) - next attribute id
+                [13] (int) - mft record number
+        '''
+        self._baad, self.fx_offset, self.fx_count, self.lsn, self.seq_number, \
+        self.hard_link_count, self.first_attr_offset, self.usage_flags, \
+        self._entry_len, self.entry_alloc_len, \
+        self.base_record_ref, self.base_record_seq, self.next_attr_id, \
+        self.mft_record = header
 
-        try:
-            self.signature = MftSignature(temp[0])
-        except ValueError as e:
-            MOD_LOGGER.exception("Entry has no valid signature.")
-            raise
-        self.fx_offset = temp[1]
-        #Fixup array elements are always 16 bits and the first is the signature
-        self.fx_count = temp[2]
-        self.lsn = temp[3]
-        self.seq_number = temp[4]
-        self.hard_link_count = temp[5]
-        self.first_attr_offset = temp[6]
-        try:
-            self.usage_flags = MftUsageFlags(temp[7])
-        except ValueError:
-            MOD_LOGGER.warning(f"Unkown MFT header usage flag {temp[7]} at entry {temp[12]}. Defaulting to UNKNOW.")
-            self.usage_flags = MftUsageFlags.UNKNOW
-        self.entry_len = temp[8] #in bytes
-        self.entry_alloc_len = temp[9] #in bytes
-        self.base_record_ref, self.base_record_seq = get_file_reference(temp[10])
-        self.next_attr_id = temp[11]
-        self.mft_record = temp[12]
+        #self._is_baad = True/False (depends on the signature)
 
-        if self.fx_offset < MFTHeader.get_header_size():
-            raise MFTHeaderException("Fix up array begins within the header.", self.mft_record)
-        if self.entry_len > self.entry_alloc_len:
-            raise MFTHeaderException("Logical size of the MFT is bigger than MFT allocated size.", self.mft_record)
+    # def __init__(self, header_view):
+    #     '''Creates an object of MFTHeader. Expects the bytes ("header_view")
+    #     that compose the entry, with the correct size'''
+    #     temp = self._REPR.unpack(header_view)
+    #
+    #     try:
+    #         self.signature = MftSignature(temp[0])
+    #     except ValueError as e:
+    #         MOD_LOGGER.exception("Entry has no valid signature.")
+    #         raise
+    #     self.fx_offset = temp[1]
+    #     #Fixup array elements are always 16 bits and the first is the signature
+    #     self.fx_count = temp[2]
+    #     self.lsn = temp[3]
+    #     self.seq_number = temp[4]
+    #     self.hard_link_count = temp[5]
+    #     self.first_attr_offset = temp[6]
+    #     try:
+    #         self.usage_flags = MftUsageFlags(temp[7])
+    #     except ValueError:
+    #         MOD_LOGGER.warning(f"Unkown MFT header usage flag {temp[7]} at entry {temp[12]}. Defaulting to UNKNOW.")
+    #         self.usage_flags = MftUsageFlags.UNKNOW
+    #     self.entry_len = temp[8] #in bytes
+    #     self.entry_alloc_len = temp[9] #in bytes
+    #     self.base_record_ref, self.base_record_seq = get_file_reference(temp[10])
+    #     self.next_attr_id = temp[11]
+    #     self.mft_record = temp[12]
+    #
+    #     if self.fx_offset < MFTHeader.get_header_size():
+    #         raise MFTHeaderException("Fix up array begins within the header.", self.mft_record)
+    #     if self.entry_len > self.entry_alloc_len:
+    #         raise MFTHeaderException("Logical size of the MFT is bigger than MFT allocated size.", self.mft_record)
 
     @classmethod
-    def get_header_size(cls):
+    def get_static_content_size(cls):
         '''Return the header size'''
         return cls._REPR.size
 
+    @classmethod
+    def create_from_binary(cls, binary_view):
+        '''Creates a new object MFTHeader from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray.
+
+        Args:
+            binary_view (memoryview of bytearray) - A binary stream with the
+                information of the attribute
+
+        Returns:
+            MFTHeader: New object using hte binary stream as source
+        '''
+        header = cls._REPR.unpack(binary_view[:cls._REPR.size])
+        nw_obj = cls()
+
+        if header[0] == b"FILE":
+            baad = False
+        elif header[0] == b"BAAD":
+            baad = True
+        else:
+            raise HeaderError("Entry has no valid signature.")
+        if header[1] < MFTHeader.get_static_content_size(): #header[1] is fx_offset
+            raise HeaderError("Fix up array begins within the header.", header[12])
+        if header[8] > header[9]: #entry_len > entry_alloc_len
+            raise HeaderError("Logical size of the MFT is bigger than MFT allocated size.", header[12])
+
+        file_ref, file_seq = get_file_reference(header[10])
+
+        nw_obj._baad, nw_obj.fx_offset, nw_obj.fx_count, nw_obj.lsn, \
+        nw_obj.seq_number, nw_obj.hard_link_count, nw_obj.first_attr_offset, \
+        nw_obj.usage_flags, nw_obj._entry_len, nw_obj.entry_alloc_len, \
+        nw_obj.base_record_ref, nw_obj.base_record_seq, nw_obj.next_attr_id, \
+        nw_obj.mft_record = \
+        baad, header[1], header[2], header[3], header[4], \
+        header[5], header[6], MftUsageFlags(header[7]), header[8], header[9], \
+        file_ref, file_seq, header[11], header[12]
+
+        return nw_obj
+
+    def is_bad_entry(self):
+        return self._baad
+
     def __len__(self):
         '''Returns the logical size of the mft entry'''
-        self.entry_len
+        return self._entry_len
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(signature={!s}, fx_offset={:#06x}, fx_count={}, lsn={}, seq_number={}, hard_link_count={}, first_attr_offset={}, usage_flags={!s}, entry_len={}, entry_alloc_len={}, base_record_ref={:#x}, base_record_seq={:#x}, next_attr_id={}, mft_record={})'.format(
-            self.signature, self.fx_offset, self.fx_count, self.lsn, self.seq_number,
-            self.hard_link_count, self.first_attr_offset, self.usage_flags, self.entry_len,
+        return self.__class__.__name__ + '(is_baad={!s}, fx_offset={:#06x}, fx_count={}, lsn={}, seq_number={}, hard_link_count={}, first_attr_offset={}, usage_flags={!s}, entry_len={}, entry_alloc_len={}, base_record_ref={:#x}, base_record_seq={:#x}, next_attr_id={}, mft_record={})'.format(
+            self._baad, self.fx_offset, self.fx_count, self.lsn, self.seq_number,
+            self.hard_link_count, self.first_attr_offset, self.usage_flags, self._entry_len,
             self.entry_alloc_len, self.base_record_ref, self.base_record_seq, self.next_attr_id,
             self.mft_record)
 

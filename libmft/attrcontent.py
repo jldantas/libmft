@@ -259,6 +259,18 @@ class AttributeList():
 
     @classmethod
     def create_from_binary(cls, binary_view):
+        '''Creates a new object AttributeList from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray. As the AttributeList is a contatiner, the binary stream has
+        to have multiple AttributeListEntry encoded.
+
+        Args:
+            binary_view (memoryview of bytearray) - A binary stream with the
+                information of the attribute
+
+        Returns:
+            AttributeList: New object using hte binary stream as source
+        '''
         attr_list = []
         offset = 0
 

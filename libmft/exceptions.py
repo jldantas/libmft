@@ -2,11 +2,14 @@
 '''
 Exceptions hierachy
 - MFTException
+-- HeaderError
+-- FixUpError
+
+
 --- HeaderException
 ------ MFTHeaderException
 ------ AttrHeaderException
 --- AttrContentException
---- FixUpError
 '''
 
 #TODO configure this based on the level of logging
@@ -51,6 +54,10 @@ class FixUpError(MFTException):
         super().__init__(msg, None, None)
         pass
 
+class HeaderError(MFTException):
+    def __init__(self, msg, entry_number=-1):
+        super().__init__(msg, None, entry_number)
+        pass
 
 class HeaderException(MFTException):
     def __init__(self, msg, entry_number):

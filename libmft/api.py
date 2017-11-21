@@ -108,29 +108,29 @@ class Attribute():
             offset = header.resident_header.content_offset
             length = header.resident_header.content_len
 
-            if header.attr_type_id is AttrTypes.FILE_NAME and mft_config["load_file_name"]:
+            if mft_config["load_file_name"] and header.attr_type_id is AttrTypes.FILE_NAME:
                 content = FileName.create_from_binary(binary_view[offset:offset+length])
-            elif header.attr_type_id is AttrTypes.STANDARD_INFORMATION and mft_config["load_std_info"]:
+            elif mft_config["load_std_info"] and header.attr_type_id is AttrTypes.STANDARD_INFORMATION:
                 content = StandardInformation.create_from_binary(binary_view[offset:offset+length])
-            elif header.attr_type_id is AttrTypes.INDEX_ROOT and mft_config["load_idx_root"]:
+            elif mft_config["load_idx_root"] and header.attr_type_id is AttrTypes.INDEX_ROOT:
                 content = IndexRoot.create_from_binary(binary_view[offset:offset+length])
-            elif header.attr_type_id is AttrTypes.ATTRIBUTE_LIST and mft_config["load_attr_list"]:
+            elif mft_config["load_attr_list"] and header.attr_type_id is AttrTypes.ATTRIBUTE_LIST:
                 content = AttributeList.create_from_binary(binary_view[offset:offset+length])
-            elif header.attr_type_id is AttrTypes.DATA and mft_config["load_data"]:
+            elif mft_config["load_data"] and header.attr_type_id is AttrTypes.DATA:
                 content = Data(binary_view[offset:offset+length])
-            elif header.attr_type_id is AttrTypes.OBJECT_ID and mft_config["load_oject_id"]:
+            elif mft_config["load_oject_id"] and header.attr_type_id is AttrTypes.OBJECT_ID:
                 content = ObjectID.create_from_binary(binary_view[offset:offset+length])
-            elif header.attr_type_id is AttrTypes.BITMAP and mft_config["load_bitmap"]:
+            elif mft_config["load_bitmap"] and header.attr_type_id is AttrTypes.BITMAP:
                 content = Bitmap(binary_view[offset:offset+length])
-            elif header.attr_type_id is AttrTypes.EA_INFORMATION and mft_config["load_ea_info"]:
+            elif mft_config["load_ea_info"] and header.attr_type_id is AttrTypes.EA_INFORMATION:
                 content = EaInformation(binary_view[offset:offset+length])
-            elif header.attr_type_id is AttrTypes.LOGGED_TOOL_STREAM and mft_config["load_log_tool_str"]:
+            elif mft_config["load_log_tool_str"] and header.attr_type_id is AttrTypes.LOGGED_TOOL_STREAM:
                 content = LoggedToolStream(binary_view[offset:offset+length])
-            elif header.attr_type_id is AttrTypes.REPARSE_POINT and mft_config["load_reparse"]:
+            elif mft_config["load_reparse"] and header.attr_type_id is AttrTypes.REPARSE_POINT:
                 content = ReparsePoint.create_from_binary(binary_view[offset:offset+length])
-            elif header.attr_type_id is AttrTypes.VOLUME_NAME and mft_config["load_vol_name"]:
+            elif mft_config["load_vol_name"] and header.attr_type_id is AttrTypes.VOLUME_NAME:
                 content = VolumeName.create_from_binary(binary_view[offset:offset+length])
-            elif header.attr_type_id is AttrTypes.VOLUME_INFORMATION and mft_config["load_vol_info"]:
+            elif mft_config["load_vol_info"] and header.attr_type_id is AttrTypes.VOLUME_INFORMATION:
                 content = VolumeInformation.create_from_binary(binary_view[offset:offset+length])
             else:
                 #print(self.header.attr_type_id)
@@ -191,7 +191,7 @@ class MFTEntry():
         entry = None
 
         if bin_view[0:4] != b"\x00\x00\x00\x00": #test if the entry is empty
-            header = MFTHeader(bin_view[:MFTHeader.get_header_size()])
+            header = MFTHeader.create_from_binary(bin_view[:MFTHeader.get_static_content_size()])
             entry = cls(header, {})
 
             if header.mft_record != entry_number:
@@ -209,7 +209,7 @@ class MFTEntry():
             if mft_config["load_attributes"]:
                 entry._load_attributes(mft_config, bin_view[header.first_attr_offset:])
             if mft_config["load_slack"]:
-                entry.slack = bin_view[header.entry_len:].tobytes()
+                entry.slack = bin_view[len(header):].tobytes()
         else:
             MOD_LOGGER.debug(f"Entry {entry_number} is empty.")
         bin_view.release() #release the underlying buffer
@@ -281,7 +281,10 @@ class MFTEntry():
             for data_attr in data_attrs:
                 ads_names.add(data_attr.header.attr_name)
 
-        return(ads_names)
+        if len(ads_names):
+            return ads_names
+        else:
+            return None
 
     def has_ads(self):
         data_attrs = self.get_attributes(AttrTypes.DATA)
@@ -369,6 +372,11 @@ class MFT():
             file_pointer.readinto(data_buffer)
             entry = MFTEntry.create_from_binary(self.mft_config, data_buffer, i)
 
+
+            if (i == 179399):
+                print(entry)
+                raise Exception("DE")
+
             if entry is not None:
                 if not entry.header.base_record_ref:
                     self.entries[i] = entry
@@ -420,13 +428,13 @@ class MFT():
                         name = fn.content.name
                         attr = fn
 
-                if not self[attr.content.parent_ref].header.usage_flags & MftUsageFlags.DIRECTORY:
-                    print("PARENT IS NOT A DIRECTORY")
-                    #TODO error handling
                 if attr.content.parent_seq != self[attr.content.parent_ref].header.seq_number: #orphan file
                     names.append(name)
                     names.append("_ORPHAN_")
                     break
+                if not self[attr.content.parent_ref].header.usage_flags & MftUsageFlags.DIRECTORY:
+                    print("PARENT IS NOT A DIRECTORY")
+                    #TODO error handling
                 index = attr.content.parent_ref
                 names.append(name)
             else: #some files just don't have a file name attribute
