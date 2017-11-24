@@ -212,6 +212,8 @@ class NonResidentAttrHeader():
         self.init_sstream = temp[6]
         if mft_config["load_dataruns"]:
             self.data_runs = DataRuns(header_view[self.rl_offset:])
+        else:
+            self.data_runs = None
 
     @classmethod
     def get_header_size(cls):

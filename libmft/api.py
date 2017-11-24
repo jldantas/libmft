@@ -121,6 +121,7 @@ class Attribute():
         return self.header.is_non_resident()
 
     def __len__(self):
+        '''Returns the length of the attribute, in bytes'''
         return len(self.header)
 
     def __repr__(self):
@@ -198,7 +199,35 @@ class MFTEntry():
         structure'''
         if attr.header.attr_type_id not in self.attrs:
             self.attrs[attr.header.attr_type_id] = []
-        self.attrs[attr.header.attr_type_id].append(attr)
+        if attr.header.attr_type_id is not AttrTypes.DATA:
+            self.attrs[attr.header.attr_type_id].append(attr)
+        #let's treat data attributes different, in theory, saves memory
+        else:
+            #TODO consider saving the vcns and corelating with the position of the clusters
+            found = False
+            for data_attr in self.attrs[AttrTypes.DATA]:
+                if data_attr.header.attr_id == attr.header.attr_id:
+                    found = True
+                    dest_non_resident = data_attr.header.non_resident_header
+                    src_non_resident = attr.header.non_resident_header
+                    if not src_non_resident.start_vcn: #if it is 0, we get more info
+                        dest_non_resident.compress_usize, dest_non_resident.alloc_sstream, \
+                        dest_non_resident.curr_sstream, dest_non_resident.init_sstream \
+                         =  src_non_resident.compress_usize, src_non_resident.alloc_sstream, \
+                            src_non_resident.curr_sstream, src_non_resident.init_sstream
+                    dest_non_resident.start_vcn = min(dest_non_resident.start_vcn, src_non_resident.start_vcn)
+                    dest_non_resident.end_vcn = max(dest_non_resident.end_vcn, src_non_resident.end_vcn)
+                    #join the data runs
+                    if dest_non_resident.data_runs is not None: #if there is and the source also has, merge
+                        if src_non_resident.data_runs is not None:
+                            dest_non_resident.data_runs += src_non_resident.data_runs
+                    else: #if there is no data run, we can just copy it
+                        dest_non_resident.data_runs = src_non_resident.data_runs
+            if not found:
+                self.attrs[attr.header.attr_type_id].append(attr)
+
+
+
 
     def _load_attributes(self, mft_config, attrs_view):
         '''This function receives a view that starts at the first attribute
@@ -344,6 +373,7 @@ class MFT():
         it.
         '''
         nw_obj = cls(mft_config)
+        mft_config = nw_obj.mft_config
 
         if not nw_obj.mft_entry_size:
             nw_obj.mft_entry_size = MFT._find_mft_size(file_pointer)
@@ -385,12 +415,10 @@ class MFT():
         return nw_obj
 
     def get_full_path(self, entry_number):
-        #TODO ADS
         index = entry_number
         names = []
         name, attr = "", None
         root_id = 5
-        #parent = 0
 
         if self[entry_number] is None:
             return None
@@ -425,6 +453,9 @@ class MFT():
         for key in self.entries:
             yield key
         #return self.entries.values()
+
+    def items(self):
+        return self.entries.items()
 
     def __getitem__(self, index):
         '''Return the specific MFT entry. In case of an empty MFT, it will return
