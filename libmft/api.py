@@ -44,7 +44,8 @@ import collections
 import logging
 import itertools
 
-from libmft.util.functions import convert_filetime, apply_fixup_array, flatten
+from libmft.util.functions import convert_filetime, apply_fixup_array, flatten, \
+    get_file_size as _get_file_size, is_related as _is_related
 from libmft.flagsandtypes import MftSignature, AttrTypes, MftUsageFlags
 from libmft.attrcontent import StandardInformation, FileName, IndexRoot, Data, \
     AttributeList, Bitmap, ObjectID, VolumeName, VolumeInformation, ReparsePoint, \
@@ -56,32 +57,6 @@ from libmft.exceptions import MFTEntryException, FixUpError
 MOD_LOGGER = logging.getLogger(__name__)
 
 #TODO multiprocessing, see below
-'''
-A deeper study/test is necessary before implementing multiprocess.
-With the standard queue model, copies of the data have to be made
-for queue input as they will be consumed. This generates lots of memory
-allocation calls and possible pickle of the data. As the processing itself
-is not so great, mostly memory manipulation/interpretation, the amount
-of calls might fuck things up. A reasonable approach would be using
-Managers and create a "shared variables", an array with multiple buffers
-and updating the buffers as they are processed. This will require some
-fine tuning of how/when the shared buffers are accessed and might become
-too complex for maintenance. So, options:
-* Use a standard queue and create copies of data read from the file
-* Use a shared queue/list and think about a way of sync things without
- messing it up
-* Actually parallelize the access to the file, passing each thread their
- "limits", this might screw IO performance... badly...
-* Don't add multiprocessing and keep using a single buffer
-**!!!!!
- * Use two queues passing buffers, once processing is done, buffer
- is inserted in another queue and the application waits for this queue
- to have buffer available
-
-The managers shit:
-    https://docs.python.org/3/library/multiprocessing.html?highlight=queue#multiprocessing-managers
-    https://stackoverflow.com/questions/11196367/processing-single-file-from-multiple-processes-in-python
-'''
 
 class Attribute():
     '''Represents an attribute, header and content. Independently the type of
@@ -101,10 +76,11 @@ class Attribute():
 
     @classmethod
     def create_from_binary(cls, mft_config, binary_view):
-        header = AttributeHeader(binary_view)
+        header = AttributeHeader.create_from_binary(mft_config, binary_view)
+        #print(header)
         content = None
 
-        if not header.non_resident:
+        if not header.is_non_resident():
             offset = header.resident_header.content_offset
             length = header.resident_header.content_len
 
@@ -142,7 +118,7 @@ class Attribute():
     def is_non_resident(self):
         '''Helper function to check if an attribute is resident or not. Returns
         True if it is resident, otherwise returns False'''
-        return self.header.non_resident
+        return self.header.is_non_resident()
 
     def __len__(self):
         return len(self.header)
@@ -330,6 +306,7 @@ class MFT():
     mft_config = {"entry_size" : 0,
                   "load_attributes" : True,
                   "load_slack" : True,
+                  "load_dataruns" : True,
                   "load_std_info" : True,
                   "load_attr_list" : True,
                   "load_file_name" : True,
@@ -347,7 +324,7 @@ class MFT():
                   "load_log_tool_str" : True
                   }
 
-    def __init__(self, file_pointer, mft_config=None):
+    def __init__(self, mft_config=None):
         '''The initialization process takes a file like object "file_pointer"
         and loads it in the internal structures. "use_cores" can be definied
         if multiple cores are to be used. The "size" argument is the size
@@ -358,54 +335,54 @@ class MFT():
         self.mft_entry_size = self.mft_config["entry_size"]
         self.entries = {}
 
-        if not self.mft_entry_size:
-            self.mft_entry_size = self._find_mft_size(file_pointer)
-        file_size = self._get_file_size(file_pointer)
-        if (file_size % self.mft_entry_size):
+    @classmethod
+    def load_from_file_pointer(cls, file_pointer, mft_config=None):
+        '''The initialization process takes a file like object "file_pointer"
+        and loads it in the internal structures. "use_cores" can be definied
+        if multiple cores are to be used. The "size" argument is the size
+        of the MFT entries. If not provided, the class will try to auto detect
+        it.
+        '''
+        nw_obj = cls(mft_config)
+
+        if not nw_obj.mft_entry_size:
+            nw_obj.mft_entry_size = MFT._find_mft_size(file_pointer)
+        file_size = _get_file_size(file_pointer)
+        if (file_size % nw_obj.mft_entry_size):
             #TODO error handling (file size not multiple of mft size)
             MOD_LOGGER.error("Unexpected file size. It is not multiple of the MFT entry size.")
 
-        end = int(file_size / self.mft_entry_size)
-        data_buffer = bytearray(self.mft_entry_size)
+        end = int(file_size / nw_obj.mft_entry_size)
+        data_buffer = bytearray(nw_obj.mft_entry_size)
         temp_entries = []
         for i in range(0, end):
             file_pointer.readinto(data_buffer)
-            entry = MFTEntry.create_from_binary(self.mft_config, data_buffer, i)
+            entry = MFTEntry.create_from_binary(mft_config, data_buffer, i)
 
-
-            if (i == 179399):
-                print(entry)
-                raise Exception("DE")
-
-            if entry is not None:
+            #some entries are marked as deleted and have no attributes, don't know why.
+            #anyway, in this case, entry is considered invalid and not added
+            if entry is not None and not entry.is_deleted() and entry.attrs:
                 if not entry.header.base_record_ref:
-                    self.entries[i] = entry
+                    nw_obj.entries[i] = entry
                 else:
                     base_record_ref = entry.header.base_record_ref
-                    if base_record_ref in self.entries: #if the parent entry has been loaded
-                        if self._is_related(self.entries[base_record_ref], entry):
-                            self.entries[base_record_ref].copy_attributes(entry)
+                    if base_record_ref in nw_obj.entries: #if the parent entry has been loaded
+                        if _is_related(nw_obj.entries[base_record_ref], entry):
+                            nw_obj.entries[base_record_ref].copy_attributes(entry)
                         else: #can happen when you have an orphan entry
-                            self.entries[i] = entry
+                            nw_obj.entries[i] = entry
                     else: #if the parent entry has not been loaded, put the entry in a temporary container
                         temp_entries.append(entry)
         #process the temporary list and add it to the "model"
         for entry in temp_entries:
             base_record_ref = entry.header.base_record_ref
-            if base_record_ref in self.entries: #if the parent entry has been loaded
-                if self._is_related(self.entries[base_record_ref], entry):
-                    self.entries[base_record_ref].copy_attributes(entry)
+            if base_record_ref in nw_obj.entries: #if the parent entry has been loaded
+                if _is_related(nw_obj.entries[base_record_ref], entry):
+                    nw_obj.entries[base_record_ref].copy_attributes(entry)
                 else: #can happen when you have an orphan entry
-                    self.entries[i] = entry
+                    nw_obj.entries[i] = entry
 
-    def _is_related(self, parent_entry, child_entry):
-        '''This function checks if a child entry is related to the parent entry.
-        This is done by comparing the reference and sequence numbers.'''
-        if parent_entry.header.mft_record == child_entry.header.base_record_ref and \
-           parent_entry.header.seq_number == child_entry.header.base_record_seq:
-            return True
-        else:
-            return False
+        return nw_obj
 
     def get_full_path(self, entry_number):
         #TODO ADS
@@ -457,7 +434,8 @@ class MFT():
     def __len__(self):
         return len(self.entries)
 
-    def _find_mft_size(self, file_object):
+    @staticmethod
+    def _find_mft_size(file_object):
         sizes = [1024, 4096, 512, 2048]
         sigs = [member.value for name, member in MftSignature.__members__.items()]
 
@@ -475,10 +453,3 @@ class MFT():
         file_object.seek(0)
 
         return size
-
-    def _get_file_size(self, file_object):
-        file_object.seek(0, 2)
-        file_size = file_object.tell()
-        file_object.seek(0, 0)
-
-        return file_size

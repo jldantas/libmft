@@ -29,7 +29,8 @@ MOD_LOGGER = logging.getLogger(__name__)
 class StandardInformation():
     '''Represents the STANDARD_INFORMATION converting the timestamps to
     datetimes and the flags to FileInfoFlags representation.'''
-    _REPR = struct.Struct("<4Q4I")
+    #_REPR = struct.Struct("<4Q4I")
+    _REPR = struct.Struct("<4QI12x")
     _REPR_NFTS_3_EXTENSION = struct.Struct("<2I2Q")
     ''' Creation time - 8
         File altered time - 8
@@ -45,10 +46,10 @@ class StandardInformation():
         Update Sequence Number (USN) - 8 (NTFS 3+)
     '''
 
-    def __init__(self, content=(None,)*12):
+    def __init__(self, content=(None,)*9):
         '''Creates a StandardInformation object. The content has to be an iterable
-        with precisely 12 elements in order.
-        If content is not provided, a 12 element tuple, where all elements are
+        with precisely 0 elements in order.
+        If content is not provided, a 0 element tuple, where all elements are
         None, is the default argument
 
         Args:
@@ -58,19 +59,20 @@ class StandardInformation():
                 [2] (datetime) - mft change time
                 [3] (datetime) - accessed
                 [4] (FileInfoFlags) - flags
-                [5] (int) - Maximum number of versions
-                [6] (int) - Version number
-                [7] (int) - Class id
-                [8] (int) - Owner id
-                [9] (int) - Security id
-                [10] (int) - Quota charged
-                [11] (int) - Update Sequence Number
+                [5] (int) - Owner id
+                [6] (int) - Security id
+                [7] (int) - Quota charged
+                [8] (int) - Update Sequence Number
         '''
         self.timestamps = {}
 
+        # self.timestamps["created"], self.timestamps["changed"], \
+        # self.timestamps["mft_change"], self.timestamps["accessed"], \
+        # self.flags, self.max_n_ver, self.ver_n, self.class_id, self.owner_id, \
+        # self.security_id, self.quota_charged, self.usn = content
         self.timestamps["created"], self.timestamps["changed"], \
         self.timestamps["mft_change"], self.timestamps["accessed"], \
-        self.flags, self.max_n_ver, self.ver_n, self.class_id, self.owner_id, \
+        self.flags, self.owner_id, \
         self.security_id, self.quota_charged, self.usn = content
 
     @classmethod
@@ -146,8 +148,11 @@ class StandardInformation():
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(timestamps={}, flags={!s}, max_n_ver={}, ver_n={}, class_id={}, owner_id={}, security_id={}, quota_charged={}, usn={})'.format(
-            self.timestamps, self.flags, self.max_n_ver, self.ver_n, self.class_id,
+        # return self.__class__.__name__ + '(timestamps={}, flags={!s}, max_n_ver={}, ver_n={}, class_id={}, owner_id={}, security_id={}, quota_charged={}, usn={})'.format(
+        #     self.timestamps, self.flags, self.max_n_ver, self.ver_n, self.class_id,
+        #     self.owner_id, self.security_id, self.quota_charged, self.usn)
+        return self.__class__.__name__ + '(timestamps={}, flags={!s}, owner_id={}, security_id={}, quota_charged={}, usn={})'.format(
+            self.timestamps, self.flags,
             self.owner_id, self.security_id, self.quota_charged, self.usn)
 
 #******************************************************************************
@@ -396,7 +401,8 @@ class FileName():
     '''Represents the FILE_NAME converting the timestamps to
     datetimes and the flags to FileInfoFlags representation.
     '''
-    _REPR = struct.Struct("<7Q2I2B")
+    #_REPR = struct.Struct("<7Q2I2B")
+    _REPR = struct.Struct("<5Q16x2I2B")
     ''' File reference to parent directory - 8
         Creation time - 8
         File altered time - 8
@@ -410,33 +416,33 @@ class FileName():
         Name type - 1
         Name - variable
     '''
+    def __init__(self, content=(None, )*11):
+        '''Creates a FileName object. The content has to be an iterable
+        with precisely 11 elements in order.
+        If content is not provided, a tuple filled with 'None' is the default
+        argument.
 
-    def __init__(self, content=(None, )*12):
-        '''Creates a FILE_NAME object. "attr_view" is the full attribute
-        content, where the first bytes is the beginning of the content of the
-        attribute'''
+        Args:
+            content (iterable), where:
+                [0] (int) - parent refence
+                [1] (int) - parent sequence
+                [2] (datetime) - created time
+                [3] (datetime) - changed time
+                [4] (datetime) - mft change time
+                [5] (datetime) - accessed
+                [7] (FileInfoFlags) - flags
+                [8] (int) - reparse value
+                [9] (int) - name length
+                [10] (NameType) - name type
+                [11] (str) - name
+        '''
         self.timestamps = {}
 
-        parent_coded_reference, self.timestamps["created"], \
+        self.parent_ref, self.parent_seq, self.timestamps["created"], \
         self.timestamps["changed"], self.timestamps["mft_change"], \
-        self.timestamps["accessed"], self.allocated_file_size, self.file_size, \
+        self.timestamps["accessed"], \
         self.flags, self.reparse_value, name_len, self.name_type, \
         self.name = content
-
-        if parent_coded_reference is not None:
-            self.parent_ref, self.parent_seq = get_file_reference(parent_coded_reference)
-            self.timestamps["created"] = convert_filetime(self.timestamps["created"])
-            self.timestamps["changed"] = convert_filetime(self.timestamps["changed"])
-            self.timestamps["mft_change"] = convert_filetime(self.timestamps["mft_change"])
-            self.timestamps["accessed"] = convert_filetime(self.timestamps["accessed"])
-            self.flags = FileInfoFlags(self.flags)
-            self.name_type = NameType(self.name_type)
-        else:
-            self.parent_ref, self.parent_seq = None, None
-
-        if len(self.name) != self.name_len:
-            MOD_LOGGER.error("Expected file name size does not match.")
-            raise AttrContentException("Error processing FILE_NAME Attr. File name size does not match")
 
     def _get_name_len(self):
         return len(self.name)
@@ -446,10 +452,21 @@ class FileName():
 
     @classmethod
     def create_from_binary(cls, binary_view):
+        nw_obj = cls()
         content = cls._REPR.unpack(binary_view[:cls._REPR.size])
         name = binary_view[cls._REPR.size:].tobytes().decode("utf_16_le")
 
-        return cls(_chain(content, (name,)))
+        file_ref, file_seq = get_file_reference(content[0])
+        nw_obj.parent_ref, nw_obj.parent_seq, nw_obj.timestamps["created"], \
+        nw_obj.timestamps["changed"], nw_obj.timestamps["mft_change"], \
+        nw_obj.timestamps["accessed"], nw_obj.flags, nw_obj.reparse_value, \
+        nw_obj.name_type, nw_obj.name = \
+        file_ref, file_seq, convert_filetime(content[1]), \
+        convert_filetime(content[2]), convert_filetime(content[3]), \
+        convert_filetime(content[4]), FileInfoFlags(content[5]), \
+        content[6], NameType(content[8]), name
+
+        return nw_obj
 
     def get_created_time(self):
         '''Return the created time. This function provides the same information
@@ -479,9 +496,9 @@ class FileName():
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(parent_ref={}, parent_seq={}, timestamps={}, allocated_file_size={}, file_size={}, flags={!s}, name_len={}, name_type={!s}, name={})'.format(
-            self.parent_ref, self.parent_seq, self.timestamps, self.allocated_file_size,
-            self.file_size, self.flags, self.name_len, self.name_type,
+        return self.__class__.__name__ + '(parent_ref={}, parent_seq={}, timestamps={}, flags={!s}, name_len={}, name_type={!s}, name={})'.format(
+            self.parent_ref, self.parent_seq, self.timestamps,
+            self.flags, self.name_len, self.name_type,
             self.name)
 
 #******************************************************************************

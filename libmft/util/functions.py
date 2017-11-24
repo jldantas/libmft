@@ -66,3 +66,23 @@ def apply_fixup_array(bin_view, fx_offset, fx_count, entry_size):
 def flatten(iterable):
     '''Returns an iterable with the list flat'''
     return itertools.chain.from_iterable(a if isinstance(a,Iterable) and not isinstance(a, str) else [a] for a in iterable)
+
+def get_file_size(file_object):
+    '''Returns the size, in bytes, of a file. Expects an object that supports
+    seek and tell methods.'''
+    position = file_object.tell()
+
+    file_object.seek(0, 2)
+    file_size = file_object.tell()
+    file_object.seek(position, 0)
+
+    return file_size
+
+def is_related(parent_entry, child_entry):
+    '''This function checks if a child entry is related to the parent entry.
+    This is done by comparing the reference and sequence numbers.'''
+    if parent_entry.header.mft_record == child_entry.header.base_record_ref and \
+       parent_entry.header.seq_number == child_entry.header.base_record_seq:
+        return True
+    else:
+        return False

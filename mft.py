@@ -23,7 +23,6 @@ test = "C:/cases/my_mft.bin"
 
 def get_relevant_fields(mft, entry, string_format="%Y-%m-%d %H:%M:%S"):
     info = []
-    print(entry)
     std_info = entry.get_attributes(AttrTypes.STANDARD_INFORMATION)[0].content
     full_path = mft.get_full_path(entry.header.mft_record)
 
@@ -102,17 +101,23 @@ def main():
     mft_config["load_ea_info"] = False
     mft_config["load_ea"] = False
     mft_config["load_log_tool_str"] = False
-
+    mft_config["load_slack"] = False
+    mft_config["load_dataruns"] = False
     #stress_filename(mft_config)
     #stress_ads(mft_config)
 
 
-    with open(test, "rb") as mft_file:
-        mft = libmft.api.MFT(mft_file, mft_config)
+    # with open(test, "rb") as mft_file:
+    #     mft = libmft.api.MFT(mft_file, mft_config)
 
-    for entry_n in mft:
-        for line in get_relevant_fields(mft, mft[entry_n]):
-            pass
+    with open(test, "rb") as mft_file:
+        mft = libmft.api.MFT.load_from_file_pointer(mft_file, mft_config)
+
+
+    # for entry_n in mft:
+    #     for line in get_relevant_fields(mft, mft[entry_n]):
+    #         pass
+
             #print(",".join(itertools.chain.from_iterable(line)))
         #print(get_relevant_fields(mft, mft[entry_n]))
         #print(entry_n, mft.get_full_path(entry_n), mft[entry_n].get_names(), mft[entry_n].get_datastream_names())
@@ -154,73 +159,5 @@ def main():
     # print(stats)
 
 
-
-    # print(mft[39])
-    # print()
-    # print(mft[41])
-
-    # a = [92924, 5123, 5126, 4999, 5000, 5128, 5072, 5074, 5077, 5079, 5210, 5211, 5212, 5091, 228, 5092, 5098, 5106, 5111, 5114, 5115, 95486]
-    # for b in a:
-    #     print(mft[b])
-
-    # print(mft[166300])
-    # print()
-    # print(mft[165669])
-
-    # print(mft[213989])
-    # print()
-    # print(mft[171977])
-    # print()
-    # print(mft[274357])
-
-            # for attr in entry.attrs.values():
-            #     for a in attr:
-            #         if a.is_non_resident():
-            #             print(a)
-
-
-    #print(mft._find_base_entry(116004))
-    # a = []
-    # b = []
-    # for i, entry in enumerate(mft):
-    #     if entry is not None:
-    #         j = mft._find_base_entry(i)
-    #         if j != i:
-    #             a.append(i)
-    #             b.append(j)
-    #
-    # a = set(a)
-    # b = set(b)
-    # for e in a:
-    #     print(mft[e])
-    # for e in b:
-    #     print(mft[e])
-
-
-    #print(mft[115975].get_file_size())
-    # for i, entry in enumerate(mft):
-    #     print(i, entry)
-    #     if entry is not None:
-    #         #print(i, entry)
-    #         #print(mft.get_full_path(i))
-    #         #print(entry.get_standard_info())
-    #         #print(entry.header.base_record_ref)
-    #         #if (entry.header.base_record_ref):
-    #         #    print(i)
-    #         j = mft._find_base_entry(i)
-    #         if i != j:
-    #             print(i, j)
-    #         #print("del?", entry.is_deleted(), "- sizes:", entry.get_full_path(i))
-    #         pass
-        #print(i, entry)
-    #print(mft[8])
-
-    #print(mft.entries)
-    #print(mft.entries)
-    # for i in range(0, len(mft)):
-    #     try:
-    #         print(mft.get_entry(i).get_file_size(), mft.get_entry(i).get_full_path)
-    #     except AttributeError:
-    #         print("Empty entry")
-
-main()
+if __name__ == '__main__':
+    main()

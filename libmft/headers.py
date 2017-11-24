@@ -63,41 +63,6 @@ class MFTHeader():
         self.base_record_ref, self.base_record_seq, self.next_attr_id, \
         self.mft_record = header
 
-        #self._is_baad = True/False (depends on the signature)
-
-    # def __init__(self, header_view):
-    #     '''Creates an object of MFTHeader. Expects the bytes ("header_view")
-    #     that compose the entry, with the correct size'''
-    #     temp = self._REPR.unpack(header_view)
-    #
-    #     try:
-    #         self.signature = MftSignature(temp[0])
-    #     except ValueError as e:
-    #         MOD_LOGGER.exception("Entry has no valid signature.")
-    #         raise
-    #     self.fx_offset = temp[1]
-    #     #Fixup array elements are always 16 bits and the first is the signature
-    #     self.fx_count = temp[2]
-    #     self.lsn = temp[3]
-    #     self.seq_number = temp[4]
-    #     self.hard_link_count = temp[5]
-    #     self.first_attr_offset = temp[6]
-    #     try:
-    #         self.usage_flags = MftUsageFlags(temp[7])
-    #     except ValueError:
-    #         MOD_LOGGER.warning(f"Unkown MFT header usage flag {temp[7]} at entry {temp[12]}. Defaulting to UNKNOW.")
-    #         self.usage_flags = MftUsageFlags.UNKNOW
-    #     self.entry_len = temp[8] #in bytes
-    #     self.entry_alloc_len = temp[9] #in bytes
-    #     self.base_record_ref, self.base_record_seq = get_file_reference(temp[10])
-    #     self.next_attr_id = temp[11]
-    #     self.mft_record = temp[12]
-    #
-    #     if self.fx_offset < MFTHeader.get_header_size():
-    #         raise MFTHeaderException("Fix up array begins within the header.", self.mft_record)
-    #     if self.entry_len > self.entry_alloc_len:
-    #         raise MFTHeaderException("Logical size of the MFT is bigger than MFT allocated size.", self.mft_record)
-
     @classmethod
     def get_static_content_size(cls):
         '''Return the header size'''
@@ -231,7 +196,7 @@ class NonResidentAttrHeader():
         Data runs - dynamic
     '''
 
-    def __init__(self, header_view, non_resident_offset):
+    def __init__(self, mft_config, header_view, non_resident_offset):
         '''Creates a NonResidentAttrHeader object. header_view is a memoryview
         starting at the beginning of the attribute and the non_resident_offset is
         the size of the AttributeHeader, pointing to where the non resident
@@ -245,7 +210,8 @@ class NonResidentAttrHeader():
         self.alloc_sstream = temp[4]
         self.curr_sstream = temp[5]
         self.init_sstream = temp[6]
-        self.data_runs = DataRuns(header_view[self.rl_offset:])
+        if mft_config["load_dataruns"]:
+            self.data_runs = DataRuns(header_view[self.rl_offset:])
 
     @classmethod
     def get_header_size(cls):
@@ -281,38 +247,54 @@ class AttributeHeader():
         Indexed flag - 1
         Padding - 1
     '''
+    def __init__(self, content=(None,)*5, resident_header=None, non_resident_header=None):
+        '''Creates an AttributeHeader object. The content has to be an iterable
+        with precisely 0 elements in order.
+        If content is not provided, a 0 element tuple, where all elements are
+        None, is the default argument
 
-    _ALWAYS_RESIDENT = [AttrTypes.STANDARD_INFORMATION, AttrTypes.FILE_NAME,
-        AttrTypes.INDEX_ROOT]
+        Args:
+            content (iterable), where:
+                [0] (AttrTypes) - Attribute type id
+                [1] (int) - length of the attribute
+                [2] (AttrFlags) - flags
+                [3] (int) - Attribute id
+                [4] (str) - Name
+        '''
+        self.attr_type_id, self.attr_len, self.flags, self.attr_id, \
+        self.attr_name = content
+        self.resident_header, self.non_resident_header = resident_header, non_resident_header
 
-    def __init__(self, header_view):
-        '''Creates a header entry with from a memoryview. The memory view must
-        start when the first attribute starts and must have all necssary data
-        related to resident or non resident headers'''
-        temp = self._REPR.unpack(header_view[:self._REPR.size])
+    @classmethod
+    def create_from_binary(cls, mft_config, binary_view):
+        '''Creates a new object AttributeHeader from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray.
 
-        self.attr_type_id = AttrTypes(temp[0])
-        self.attr_len = temp[1]
-        self.non_resident = bool(temp[2])
-        self.name_len = temp[3]
-        self.name_offset = temp[4]
-        self.flags = AttrFlags(temp[5])
-        self.attr_id = temp[6]
-        self.resident_header = None
-        self.non_resident_header = None
-        self.attr_name = None
+        Args:
+            binary_view (memoryview of bytearray) - A binary stream with the
+                information of the attribute
 
-        if self.name_len:
-            self.attr_name = header_view[self.name_offset:self.name_offset+(2*self.name_len)].tobytes().decode("utf_16_le")
+        Returns:
+            AttributeHeader: New object using hte binary stream as source
+        '''
+        header = cls._REPR.unpack(binary_view[:cls._REPR.size])
+        resident_header, non_resident_header = None, None
+        #nw_obj = cls()
 
-        if self.attr_type_id in AttributeHeader._ALWAYS_RESIDENT and self.non_resident:
-            MOD_LOGGER.error(f"Attribute {self.attr_type.name} must always be resident")
-            raise AttrHeaderException(f"Attribute {self.attr_type.name} is always resident.")
+        non_resident, name_len, name_offset = header[2], header[3], header[4]
 
-        if not self.non_resident:
-            self.resident_header = ResidentAttrHeader._make(self._REPR_RESIDENT.unpack(header_view[self._REPR.size:self._REPR.size + self._REPR_RESIDENT.size]))
+        if not non_resident:
+            resident_header = ResidentAttrHeader._make(cls._REPR_RESIDENT.unpack(binary_view[cls._REPR.size:cls._REPR.size + cls._REPR_RESIDENT.size]))
         else:
-            self.non_resident_header = NonResidentAttrHeader(header_view, self._REPR.size)
+            non_resident_header = NonResidentAttrHeader(mft_config, binary_view, cls._REPR.size)
+
+        if name_len:
+            attr_name = binary_view[name_offset:name_offset+(2*name_len)].tobytes().decode("utf_16_le")
+        else:
+            attr_name = None
+
+        return cls((AttrTypes(header[0]), header[1], AttrFlags(header[5]), header[6], attr_name), resident_header, non_resident_header)
 
     @classmethod
     def get_base_header_size(cls):
@@ -330,13 +312,19 @@ class AttributeHeader():
         datarun size or information.'''
         return cls._REPR_NONRESIDENT.size
 
+    def is_non_resident(self):
+        if self.resident_header:
+            return False
+        else:
+            return True
+
     def __len__(self):
         '''Returns the logical size of the attribute'''
         return self.attr_len
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(attr_type_id={!s}, attr_len={}, nonresident_flag={}, name_len={}, name_offset={:#06x}, flags={!s}, attr_id={}, resident_header={}, non_resident_header={}, attr_name={})'.format(
-            self.attr_type_id, self.attr_len, self.non_resident,
-            self.name_len, self.name_offset, self.flags, self.attr_id,
+        return self.__class__.__name__ + '(attr_type_id={!s}, attr_len={}, nonresident_flag={}, flags={!s}, attr_id={}, resident_header={}, non_resident_header={}, attr_name={})'.format(
+            self.attr_type_id, self.attr_len, self.is_non_resident(),
+            self.flags, self.attr_id,
             self.resident_header, self.non_resident_header, self.attr_name)
