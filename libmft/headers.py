@@ -249,7 +249,7 @@ class AttributeHeader():
         Indexed flag - 1
         Padding - 1
     '''
-    def __init__(self, content=(None,)*5, resident_header=None, non_resident_header=None):
+    def __init__(self, content=(None,)*7):
         '''Creates an AttributeHeader object. The content has to be an iterable
         with precisely 0 elements in order.
         If content is not provided, a 0 element tuple, where all elements are
@@ -262,10 +262,14 @@ class AttributeHeader():
                 [2] (AttrFlags) - flags
                 [3] (int) - Attribute id
                 [4] (str) - Name
+                [5] (ResidentAttrHeader) - Resident header
+                [6] (NonResidentAttrHeader) - Non resident header
         '''
         self.attr_type_id, self.attr_len, self.flags, self.attr_id, \
-        self.attr_name = content
-        self.resident_header, self.non_resident_header = resident_header, non_resident_header
+        self.attr_name, self.resident_header, self.non_resident_header = content
+
+        if self.resident_header is not None and self.non_resident_header is not None:
+            raise HeaderError("An attribute cannot have a resident and a non resident header at the same time.")
 
     @classmethod
     def create_from_binary(cls, mft_config, binary_view):
@@ -282,7 +286,7 @@ class AttributeHeader():
         '''
         header = cls._REPR.unpack(binary_view[:cls._REPR.size])
         resident_header, non_resident_header = None, None
-        #nw_obj = cls()
+        nw_obj = cls()
 
         non_resident, name_len, name_offset = header[2], header[3], header[4]
 
@@ -296,7 +300,12 @@ class AttributeHeader():
         else:
             attr_name = None
 
-        return cls((AttrTypes(header[0]), header[1], AttrFlags(header[5]), header[6], attr_name), resident_header, non_resident_header)
+        nw_obj.attr_type_id, nw_obj.attr_len, nw_obj.flags, nw_obj.attr_id, \
+        nw_obj.attr_name, nw_obj.resident_header, nw_obj.non_resident_header = \
+        AttrTypes(header[0]), header[1], AttrFlags(header[5]), header[6], \
+        attr_name, resident_header, non_resident_header
+
+        return nw_obj
 
     @classmethod
     def get_base_header_size(cls):

@@ -37,6 +37,12 @@ have a header and a content. A rough of diagram can be seen below:
 -- AttributeHeader - Represents the header of the attribute, including if it is
     resident or non-resident
 -- The content depends on the type of attribute
+
+- Considerations
+
+While a entry provides a logical MFT entry, a logical MFT entry may contain
+multiple logical entries (hard links and data streams) which means that one entry
+needs to be correctly processed to show all the data
 '''
 import struct
 import enum
