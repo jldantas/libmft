@@ -62,7 +62,75 @@ from libmft.exceptions import MFTEntryException, FixUpError
 
 MOD_LOGGER = logging.getLogger(__name__)
 
-#TODO multiprocessing, see below
+class Datastream():
+    def __init__(self):
+        #we don't need to save the compression usize because we are unable to access the rest of the disk
+        self.name = None
+        self.size = 0 #logical size
+        self.alloc_size = 0 #allocated size
+        self.cluster_count = 0
+        self._pending_processing = {}
+        self._data_runs = []
+        self._content = None
+
+
+    def add_data_attribute(self, data_attr):
+        #TODO check if the attribute is really data type
+        #TODO check if the name is correct
+
+        if data_attr.header.attr_type_id is not AttrTypes.DATA:
+            pass
+        if data_attr.header.attr_name != self.name:
+            pass
+
+        if data_attr.header.is_non_resident():
+            nonr_header = data_attr.header.non_resident_header
+            #TODO instead of just creating a structure, see if it is okay first
+            self._pending_processing[nonr_header.start_vcn] = (nonr_header.end_vcn, nonr_header.data_runs)
+            if not nonr_header.start_vcn:
+                self.size = nonr_header.curr_sstream
+                self.alloc_size = nonr_header.alloc_sstream
+            self._collapse()
+        else: #if it is resident
+            self.size = self.alloc_size = data_attr.header.resident_header.content_len
+            self._data_runs = None
+            self._pending_processing = None
+            #respects mft_config["load_data"]
+            self._content = data_attr.content
+
+        print(self)
+
+
+    def _collapse(self):
+        remove = []
+
+        #print(self._pending_processing)
+
+        for start_vcn, (end_vcn, dataruns) in self._pending_processing.items():
+            if start_vcn == self.cluster_count + 1:
+                self.cluster_count = end_vcn
+                self.data_runs.append(dataruns)
+                self.remove.append(start_vcn)
+
+        for vcn in remove:
+            del(self._pending_processing[vcn])
+
+    def is_resident(self):
+        if self._data_runs is None:
+            return True
+        else:
+            return False
+
+    def __eq__(self, cmp):
+        if self.name == cmp.name:
+            return True
+        else:
+            return False
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return self.__class__.__name__ + '(name={}, size={}, alloc_size={}, cluster_count={}, _pending_processing={}, _data_runs={}, _content={})'.format(
+            self.name, self.size, self.alloc_size, self.cluster_count, self._pending_processing, self._data_runs, self._content)
 
 class Attribute():
     '''Represents an attribute, header and content. Independently the type of
@@ -152,6 +220,9 @@ class MFTEntry():
         '''
         self.header, self.attrs, self.slack = header, attrs, slack
 
+        #--------------
+        self.data_streams = None
+
     @classmethod
     def create_from_binary(cls, mft_config, binary_data, entry_number):
         #TODO test carefully how to find the correct index entry, specially with NTFS versions < 3
@@ -177,6 +248,9 @@ class MFTEntry():
             header = MFTHeader.create_from_binary(bin_view[:MFTHeader.get_static_content_size()])
             entry = cls(header, {})
 
+            #-----------------
+            entry.data_streams = []
+
             if header.mft_record != entry_number:
                 MOD_LOGGER.warning(f"The MFT entry number doesn't match. {entry_number} != {self.header_mft_record}")
             if len(binary_data) != header.entry_alloc_len:
@@ -199,41 +273,64 @@ class MFTEntry():
 
         return entry
 
+    def _add_datastream(self, data_attr):
+        attr_name = data_attr.header.attr_name
+
+        for stream in self.data_streams:
+            if stream.name == attr_name:
+                stream.add_data_attribute(data_attr)
+                return #TODO very bad practice, replace later
+
+        nw_data_stream = Datastream()
+        nw_data_stream.add_data_attribute(data_attr)
+        self.data_streams.append(nw_data_stream)
+
+
     def _add_attribute(self, attr):
         '''Adds one attribute to the list of attributes. Checks if the the entry
         already has another entry of the attribute and if not, creates the necessary
         structure'''
-        if attr.header.attr_type_id not in self.attrs:
-            self.attrs[attr.header.attr_type_id] = []
-        if attr.header.attr_type_id is not AttrTypes.DATA:
-            self.attrs[attr.header.attr_type_id].append(attr)
-        #let's treat data attributes different, in theory, saves memory
+        if attr.header.attr_type_id is AttrTypes.DATA:
+            self._add_datastream(attr)
         else:
-            #TODO consider saving the vcns and corelating with the position of the clusters
-            found = False
-            for data_attr in self.attrs[AttrTypes.DATA]:
-                if data_attr.header.attr_id == attr.header.attr_id:
-                    found = True
-                    dest_non_resident = data_attr.header.non_resident_header
-                    src_non_resident = attr.header.non_resident_header
-                    if not src_non_resident.start_vcn: #if it is 0, we get more info
-                        dest_non_resident.compress_usize, dest_non_resident.alloc_sstream, \
-                        dest_non_resident.curr_sstream, dest_non_resident.init_sstream \
-                         =  src_non_resident.compress_usize, src_non_resident.alloc_sstream, \
-                            src_non_resident.curr_sstream, src_non_resident.init_sstream
-                    dest_non_resident.start_vcn = min(dest_non_resident.start_vcn, src_non_resident.start_vcn)
-                    dest_non_resident.end_vcn = max(dest_non_resident.end_vcn, src_non_resident.end_vcn)
-                    #join the data runs
-                    if dest_non_resident.data_runs is not None: #if there is and the source also has, merge
-                        if src_non_resident.data_runs is not None:
-                            dest_non_resident.data_runs += src_non_resident.data_runs
-                    else: #if there is no data run, we can just copy it
-                        dest_non_resident.data_runs = src_non_resident.data_runs
-            if not found:
-                self.attrs[attr.header.attr_type_id].append(attr)
+            if attr.header.attr_type_id not in self.attrs:
+                self.attrs[attr.header.attr_type_id] = []
+            self.attrs[attr.header.attr_type_id].append(attr)
 
 
 
+    # def _add_attribute(self, attr):
+    #     '''Adds one attribute to the list of attributes. Checks if the the entry
+    #     already has another entry of the attribute and if not, creates the necessary
+    #     structure'''
+    #     if attr.header.attr_type_id not in self.attrs:
+    #         self.attrs[attr.header.attr_type_id] = []
+    #     if attr.header.attr_type_id is not AttrTypes.DATA:
+    #         self.attrs[attr.header.attr_type_id].append(attr)
+    #     #let's treat data attributes different, in theory, saves memory
+    #     else:
+    #         #TODO consider saving the vcns and corelating with the position of the clusters
+    #         found = False
+    #         for data_attr in self.attrs[AttrTypes.DATA]:
+    #             if data_attr.header.attr_id == attr.header.attr_id:
+    #                 found = True
+    #                 dest_non_resident = data_attr.header.non_resident_header
+    #                 src_non_resident = attr.header.non_resident_header
+    #                 if not src_non_resident.start_vcn: #if it is 0, we get more info
+    #                     dest_non_resident.compress_usize, dest_non_resident.alloc_sstream, \
+    #                     dest_non_resident.curr_sstream, dest_non_resident.init_sstream \
+    #                      =  src_non_resident.compress_usize, src_non_resident.alloc_sstream, \
+    #                         src_non_resident.curr_sstream, src_non_resident.init_sstream
+    #                 dest_non_resident.start_vcn = min(dest_non_resident.start_vcn, src_non_resident.start_vcn)
+    #                 dest_non_resident.end_vcn = max(dest_non_resident.end_vcn, src_non_resident.end_vcn)
+    #                 #join the data runs
+    #                 if dest_non_resident.data_runs is not None: #if there is and the source also has, merge
+    #                     if src_non_resident.data_runs is not None:
+    #                         dest_non_resident.data_runs += src_non_resident.data_runs
+    #                 else: #if there is no data run, we can just copy it
+    #                     dest_non_resident.data_runs = src_non_resident.data_runs
+    #         if not found:
+    #             self.attrs[attr.header.attr_type_id].append(attr)
 
     def _load_attributes(self, mft_config, attrs_view):
         '''This function receives a view that starts at the first attribute
@@ -247,6 +344,20 @@ class MFTEntry():
             attr = Attribute.create_from_binary(mft_config, attrs_view[offset:])
             self._add_attribute(attr)
             offset += len(attr)
+
+    # def get_logical_files(self):
+    #     import itertools #move this
+    #
+    #     files = []
+    #     fn_attrs = self.get_attributes(AttrTypes.FILE_NAME)
+    #
+    #     if fn_attrs is not None:
+    #         for itertools.groupby(fn_attrs, )
+    #         for i1, i2 in itertools.combinations(fn_attrs, 2)
+    #         fn_info = [(i, fn.attr_id, fn.content.parent_ref, fn.content.parent_seq) for i, fn in enumerate(fn_attrs)]
+
+
+
 
     def copy_attributes(self, source_entry):
         for key, list_attr in source_entry.attrs.items():

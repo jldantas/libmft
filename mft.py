@@ -165,7 +165,7 @@ def stress_filename(mft_config):
     sample = "./mft_samples/stress_filename.bin"
 
     with open(sample, "rb") as mft_file:
-        mft = libmft.api.MFT(mft_file, mft_config)
+        mft = libmft.api.MFT.load_from_file_pointer(mft_file, mft_config)
 
     print("MFT length:", len(mft))
     for entry_n in mft:
@@ -200,20 +200,16 @@ def main():
     #stress_filename(mft_config)
     #stress_ads(mft_config)
 
-
-    # with open(test, "rb") as mft_file:
-    #     mft = libmft.api.MFT(mft_file, mft_config)
-
     with open(test, "rb") as mft_file:
         mft = libmft.api.MFT.load_from_file_pointer(mft_file, mft_config)
-
 
     #print(mft[4584], "\n", mft[149327], "\n", mft[8277], "\n", mft[8278])
 
     #print(get_names_from_fn(mft[4584]), get_names_from_fn(mft[64485]))
     print(get_full_path_v2(mft, 4584), get_full_path_v2(mft, 64485))
+    print(mft[4584], mft[64485])
 
-    print(mft[5213])
+    #print(mft[5213])
 
     for n, entry in mft.items():
         a = entry.get_attributes(AttrTypes.DATA)
@@ -224,39 +220,6 @@ def main():
     #
             #break
 
-    # for entry_n in mft:
-    #     for line in get_relevant_fields(mft, mft[entry_n]):
-    #         pass
-
-            #print(",".join(itertools.chain.from_iterable(line)))
-        #print(get_relevant_fields(mft, mft[entry_n]))
-        #print(entry_n, mft.get_full_path(entry_n), mft[entry_n].get_names(), mft[entry_n].get_datastream_names())
-    #     mft = libmft.api.MFT(mft_file)
-    #
-    #
-    #
-    #
-    # for entry_n in mft:
-    #     #if mft[entry_n].has_ads() and len(mft[entry_n].get_attributes(AttrTypes.DATA)) >= 3:
-    #     #print(entry_n)
-        # print(entry_n, mft[entry_n].is_directory(), mft.get_full_path(entry_n), mft[entry_n].get_names(), mft[entry_n].get_datastream_names())
-    #     #print(entry_n,  mft[entry_n])
-    #     #print(mft[entry_n].has_ads())
-
-    #print(mft[39].get_attributes(AttrTypes.DATA))
-
-    #mft.get_full_path(38941)
-
-    #print(mft.get_full_path(15173))
-
-    # for i, entry in enumerate(mft):
-    #     #if entry is not None and entry.is_deleted():
-    #     if entry is not None:
-    #         #mft._find_base_entry(i)
-    #         print(i, entry.is_deleted(), mft.get_full_path(i))
-
-    # i = 98126
-    # print(i, mft[i].is_deleted(), mft.get_full_path(i))
     #
     # stats = {}
     # for i, entry in enumerate(mft):
