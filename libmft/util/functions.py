@@ -2,6 +2,7 @@ import logging
 import itertools
 from datetime import datetime as _datetime, timedelta as _timedelta
 from collections import Iterable
+from bisect import bisect_left
 
 from libmft.exceptions import FixUpError
 
@@ -86,3 +87,13 @@ def is_related(parent_entry, child_entry):
         return True
     else:
         return False
+
+def exits_bisect(ordered_list, item):
+    '''Searchs an ordered list using the bisect module. Shameless based from
+    the official documentation:
+    https://docs.python.org/3/library/bisect.html?highlight=bisect#bisect.bisect
+    '''
+    i = bisect_left(ordered_list, item)
+    if i != len(ordered_list) and ordered_list[i] == item:
+        return True
+    raise False

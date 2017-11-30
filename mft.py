@@ -1,7 +1,8 @@
 import copy
 import itertools
 
-import libmft.api
+#import libmft.api
+import libmft.api2
 from libmft.flagsandtypes import AttrTypes, FileInfoFlags, MftUsageFlags
 
 #test = "./mft_samples/MFT_singlefile.bin"
@@ -181,9 +182,22 @@ def stress_ads(mft_config):
     for entry_n in mft:
         print(entry_n, mft.get_full_path(entry_n), mft[entry_n].get_names(), mft[entry_n].get_datastream_names())
 
+def test_data(mft_config):
+    sample = "multiple_data.bin"
+    mft_config["apply_fixup_array"] = False
+    mft_config["load_dataruns"] = False
+
+    with open(sample, "rb") as mft_file:
+        mft = libmft.api.MFT.load_from_file_pointer(mft_file, mft_config)
+
+    for entry_n in mft:
+        print(entry_n, mft[entry_n])
+        print(mft[entry_n].data_streams)
+
 
 def main():
-    mft_config = copy.deepcopy(libmft.api.MFT.mft_config)
+    #mft_config = copy.deepcopy(libmft.api.MFT.mft_config)
+    mft_config = copy.deepcopy(libmft.api2.MFT.mft_config)
     mft_config["load_attr_list"] = False
     mft_config["load_oject_id"] = False
     mft_config["load_sec_desc"] = False
@@ -199,23 +213,33 @@ def main():
 
     #stress_filename(mft_config)
     #stress_ads(mft_config)
+    #test_data(mft_config)
+
 
     with open(test, "rb") as mft_file:
-        mft = libmft.api.MFT.load_from_file_pointer(mft_file, mft_config)
+        mft = libmft.api2.MFT(mft_file)
 
-    #print(mft[4584], "\n", mft[149327], "\n", mft[8277], "\n", mft[8278])
 
-    #print(get_names_from_fn(mft[4584]), get_names_from_fn(mft[64485]))
-    print(get_full_path_v2(mft, 4584), get_full_path_v2(mft, 64485))
-    print(mft[4584], mft[64485])
+    # with open(test, "rb") as mft_file:
+    #     #mft = libmft.api.MFT.load_from_file_pointer(mft_file, mft_config)
+    #     mft = libmft.api.MFT.load_from_file_pointer(mft_file)
+    #
+    # #print(mft[4584], "\n", mft[149327], "\n", mft[8277], "\n", mft[8278])
+    #
+    # #print(get_names_from_fn(mft[4584]), get_names_from_fn(mft[64485]))
+    # # print(get_full_path_v2(mft, 4584), get_full_path_v2(mft, 64485))
+    # # print(mft[4584], mft[64485])
+    #
+    # print(mft[75429])
+    # print(mft[75429].data_streams)
 
     #print(mft[5213])
 
-    for n, entry in mft.items():
-        a = entry.get_attributes(AttrTypes.DATA)
-        if a is not None and len(a) >= 5:
-            print(n, a)
-            break
+    # for n, entry in mft.items():
+    #     a = entry.get_attributes(AttrTypes.DATA)
+    #     if a is not None and len(a) >= 5:
+    #         print(n, a)
+    #         break
 
     #
             #break

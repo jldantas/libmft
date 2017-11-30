@@ -48,10 +48,14 @@ import struct
 import enum
 import collections
 import logging
-import itertools
+
+from itertools import chain as _chain
+from collections import defaultdict as _defaultdict
+from functools import lru_cache
 
 from libmft.util.functions import convert_filetime, apply_fixup_array, flatten, \
-    get_file_size as _get_file_size, is_related as _is_related
+    get_file_size as _get_file_size, is_related as _is_related, get_file_reference, \
+    exits_bisect
 from libmft.flagsandtypes import MftSignature, AttrTypes, MftUsageFlags
 from libmft.attrcontent import StandardInformation, FileName, IndexRoot, Data, \
     AttributeList, Bitmap, ObjectID, VolumeName, VolumeInformation, ReparsePoint, \
@@ -462,6 +466,61 @@ class MFTEntry():
         return self.__class__.__name__ + '(header={}, attrs={})'.format(
             self.header, self.attrs)
 
+def is_related2(parent_entry, child_entry):
+    '''This function checks if a child entry is related to the parent entry.
+    This is done by comparing the reference and sequence numbers.'''
+    if parent_entry.mft_record == child_entry.base_record_ref and \
+       parent_entry.seq_number == child_entry.base_record_seq:
+        return True
+    else:
+        return False
+
+class _MFTEntryStub():
+    #TODO create a way of dealing with XP only artefacts
+    _REPR = struct.Struct("<16xH14xQ")
+    ''' Ignore the first 16 bytes (Signature, fix up array offset, count and
+            lsn)
+        Sequence number - 2
+        Ignore the next 14 bytes (hard link count, offset to 1st attr, usage flags,
+            mft logical size and physical size)
+        Base record # - 8
+    '''
+    def __init__(self, content=(None,)*4):
+        self.mft_record, self.seq_number, self.base_record_ref, \
+        self.base_record_seq = content
+
+    @classmethod
+    def load_from_file_pointer(cls, binary_stream, record_n):
+        nw_obj = None
+
+        if binary_stream[0:4] != b"\x00\x00\x00\x00": #test if the entry is empty
+            seq_number, ref = cls._REPR.unpack(binary_stream)
+            file_ref, file_seq = get_file_reference(ref)
+            nw_obj = cls()
+
+            nw_obj.mft_record, nw_obj.seq_number, nw_obj.base_record_ref, \
+            nw_obj.base_record_seq = record_n, seq_number, file_ref, file_seq
+        else:
+            MOD_LOGGER.debug(f"Entry {record_n} is empty.")
+
+        return nw_obj
+
+    @classmethod
+    def get_static_content_size(cls):
+        '''Returns the static size of the content never taking in consideration
+        variable fields, for example, names.
+
+        Returns:
+            int: The size of the content, in bytes
+        '''
+        return cls._REPR.size
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        #TODO print the slack?
+        return self.__class__.__name__ + '(mft_record={}, seq_number={}, base_record_ref={}, base_record_seq={})'.format(
+            self.mft_record, self.seq_number, self.base_record_ref, self.base_record_seq)
+
 class MFT():
     '''This class represents a MFT file. It has a bunch of MFT entries
     that have been parsed
@@ -488,100 +547,63 @@ class MFT():
                   "load_log_tool_str" : True
                   }
 
-    def __init__(self, mft_config=None):
+    def __init__(self, file_pointer, mft_config=None):
         '''The initialization process takes a file like object "file_pointer"
         and loads it in the internal structures. "use_cores" can be definied
         if multiple cores are to be used. The "size" argument is the size
         of the MFT entries. If not provided, the class will try to auto detect
         it.
         '''
+        self.file_pointer = file_pointer
         self.mft_config = mft_config if mft_config is not None else MFT.mft_config
         self.mft_entry_size = self.mft_config["entry_size"]
-        self.entries = {}
+        self._entries_parent_child = _defaultdict(list)
+        self._empty_entries = set()
+        self._entries_child_parent = {}
 
-    @classmethod
-    def load_from_file_pointer(cls, file_pointer, mft_config=None):
-        '''The initialization process takes a file like object "file_pointer"
-        and loads it in the internal structures. "use_cores" can be definied
-        if multiple cores are to be used. The "size" argument is the size
-        of the MFT entries. If not provided, the class will try to auto detect
-        it.
-        '''
-        nw_obj = cls(mft_config)
-        mft_config = nw_obj.mft_config
+        if not self.mft_entry_size: #if entry size is zero, try to autodetect
+            self.mft_entry_size = MFT._find_mft_size(file_pointer)
 
-        if not nw_obj.mft_entry_size:
-            nw_obj.mft_entry_size = MFT._find_mft_size(file_pointer)
-        file_size = _get_file_size(file_pointer)
-        if (file_size % nw_obj.mft_entry_size):
-            #TODO error handling (file size not multiple of mft size)
-            MOD_LOGGER.error("Unexpected file size. It is not multiple of the MFT entry size.")
+        self._load_stub_info()
 
-        end = int(file_size / nw_obj.mft_entry_size)
-        data_buffer = bytearray(nw_obj.mft_entry_size)
-        temp_entries = []
-        for i in range(0, end):
-            file_pointer.readinto(data_buffer)
-            entry = MFTEntry.create_from_binary(mft_config, data_buffer, i)
-            #some entries are marked as deleted and have no attributes, don't know why.
-            #anyway, in this case, entry is considered invalid and not added
-            if entry is not None and not entry.is_deleted() and entry.attrs:
-                if not entry.header.base_record_ref:
-                    nw_obj.entries[i] = entry
-                else:
-                    base_record_ref = entry.header.base_record_ref
-                    if base_record_ref in nw_obj.entries: #if the parent entry has been loaded
-                        if _is_related(nw_obj.entries[base_record_ref], entry):
-                            nw_obj.entries[base_record_ref].copy_attributes(entry)
-                        else: #can happen when you have an orphan entry
-                            nw_obj.entries[i] = entry
-                    else: #if the parent entry has not been loaded, put the entry in a temporary container
-                        temp_entries.append(entry)
-        #process the temporary list and add it to the "model"
-        for entry in temp_entries:
-            base_record_ref = entry.header.base_record_ref
-            if base_record_ref in nw_obj.entries: #if the parent entry has been loaded
-                if _is_related(nw_obj.entries[base_record_ref], entry):
-                    nw_obj.entries[base_record_ref].copy_attributes(entry)
-                else: #can happen when you have an orphan entry
-                    nw_obj.entries[i] = entry
+    def _load_stub_info(self):
+        mft_entry_size = self.mft_entry_size
+        read_size = _MFTEntryStub.get_static_content_size()
+        data_buffer = bytearray(read_size)
 
-        return nw_obj
+        temp = []
 
-    def get_full_path(self, entry_number):
-        index = entry_number
-        names = []
-        name, attr = "", None
-        root_id = 5
+        #loads minimum amount of data from the file for now
+        MOD_LOGGER.info("Loading basic info from file...")
+        for i in range(0, _get_file_size(self.file_pointer), mft_entry_size):
+            mft_record_n = int(i/mft_entry_size)    #calculate which is the entry number
+            self.file_pointer.seek(i)
+            self.file_pointer.readinto(data_buffer)
+            stub = _MFTEntryStub.load_from_file_pointer(data_buffer, mft_record_n)
+            temp.append(stub)
+        #from the information loaded, find which entries are related and the one that are empty
+        MOD_LOGGER.info("Mapping related entries...")
+        for i, stub in enumerate(temp):
+            if stub is not None:
+                if stub.base_record_ref and is_related2(temp[stub.base_record_ref], stub): #stub.base_record_ref is not 0
+                    self._entries_parent_child[stub.base_record_ref].append(stub.mft_record)
+                    self._entries_child_parent[stub.mft_record] = stub.base_record_ref
+            else:
+                #self._empty_entries.append(i)
+                self._empty_entries.add(i)
 
-        if self[entry_number] is None:
-            return None
+    def _read_full_entry(self, entry_number):
+        if entry_number in self._entries_parent_child:
+            extras = self._entries_parent_child[entry_number]
+        else:
+            extras = []
 
-        while index != root_id:
-            fn_attrs = self[index].get_attributes(AttrTypes.FILE_NAME)
+        for number in _chain([entry_number], extras):
+            print(number)
 
-            if fn_attrs is not None:
-                name, attr = "", None
-                for fn in fn_attrs:
-                    if fn.content.name_len > len(name):
-                        name = fn.content.name
-                        attr = fn
+        pass
 
-                if attr.content.parent_seq != self[attr.content.parent_ref].header.seq_number: #orphan file
-                    names.append(name)
-                    names.append("_ORPHAN_")
-                    break
-                if not self[attr.content.parent_ref].header.usage_flags & MftUsageFlags.DIRECTORY:
-                    print("PARENT IS NOT A DIRECTORY")
-                    #TODO error handling
-                index = attr.content.parent_ref
-                names.append(name)
-            else: #some files just don't have a file name attribute
-                #TODO throw an exception?
-                #TODO logging
-                return ""
 
-        return "\\".join(reversed(names))
 
     def __iter__(self):
         for key in self.entries:
@@ -591,9 +613,21 @@ class MFT():
     def items(self):
         return self.entries.items()
 
+    @lru_cache(128)
     def __getitem__(self, index):
         '''Return the specific MFT entry. In case of an empty MFT, it will return
         None'''
+        search_for = index
+        if search_for in self._empty_entries:
+            raise ValueError
+        if search_for in self._entries_child_parent:
+            search_for = self._entries_child_parent[search_for]
+
+        return self._read_full_entry(search_for)
+
+
+
+
         return self.entries[index]
 
     def __len__(self):
