@@ -70,10 +70,10 @@ MOD_LOGGER = logging.getLogger(__name__)
 class Datastream():
     '''Represents one datastream for a entry. This datastream has all the necessary
     information, for example, name, size, allocated size, number of clusters, etc.
-    The data runs, if loaded, are guaranteed to be in order.
+    The data runs, if loaded, are guaranteed to be in order after a call to get_dataruns.
 
-    The main idea is that this way we can save memory space and normalize
-    access to a data Independently if it is resident or non resident.
+    The main idea is that this way we can save memory and normalize
+    access to a data independently if it is resident or non resident.
     '''
     def __init__(self, name=None):
         '''Initialize on datastream. The only parameter accepted is the
@@ -84,6 +84,9 @@ class Datastream():
         self.alloc_size = 0 #allocated size
         self.cluster_count = 0
         self._data_runs = None #data runs only exist if the attribute is non resident
+        #the _data_runs variable stores a tuple with the format:
+        #(start_vcn, end_vcn, dataruns). We use the start_vcn to sort the dataruns in
+        #the correct order
         self._content = None
         self._data_runs_sorted = False
 
@@ -103,6 +106,7 @@ class Datastream():
             if not nonr_header.start_vcn: #start_vcn == 0
                 self.size = nonr_header.curr_sstream
                 self.alloc_size = nonr_header.alloc_sstream
+            #TODO I think we need only the start_vcn and not the end_vcn. verify.
             self._data_runs.append((nonr_header.start_vcn, nonr_header.end_vcn, nonr_header.data_runs))
             self._data_runs_sorted = False
         else: #if it is resident
@@ -111,13 +115,14 @@ class Datastream():
             #respects mft_config["load_data"]
             self._content = data_attr.content.content
 
-        #print(self)
-
     def add_from_datastream(self, source_ds):
+        '''Add information from another datastream. Verifies if the datastream
+        added is correct and copy the relevant fields if necessary.'''
         if source_ds.name != self.name:
             raise DataStreamError("Data from a different stream 'f{source_ds.name}' cannot be add to this stream")
         if self._data_runs is None:
             raise DataStreamError("Cannot add data to a resident datastream.")
+
         if self.cluster_count < source_ds.cluster_count:
             self.cluster_count = source_ds.cluster_count
         if self.size == 0 and source_ds.size:
@@ -128,29 +133,36 @@ class Datastream():
             self._data_runs_sorted = False
 
     def get_dataruns(self):
+        '''Returns a list of dataruns, in order.
+        '''
         if self._data_runs is None:
             raise DataStreamError("Resident datastream don't have dataruns")
+
         if not self._data_runs_sorted:
             self._data_runs.sort(key=_itemgetter(0))
 
         return [data[2] for data in self._data_runs]
 
-    def is_resident(self):
-        if self._data_runs is None:
-            return True
-        else:
-            return False
+    def get_content(self):
+        '''Returns the content of a resident datastream'''
+        if not self.is_resident():
+            raise DataStreamError("Non resident datastream don't have content")
 
-    def __eq__(self, cmp):
-        if self.name == cmp.name:
+        return self._content
+
+    def is_resident(self):
+        '''Check is the datastream is resident or non resident. In case of it
+        begin resident, it is possible to recover the content of the datastream
+        '''
+        if self._data_runs is None:
             return True
         else:
             return False
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(name={}, size={}, alloc_size={}, cluster_count={}, _data_runs={}, _content={})'.format(
-            self.name, self.size, self.alloc_size, self.cluster_count, self._data_runs, self._content)
+        return self.__class__.__name__ + '(name={}, size={}, alloc_size={}, cluster_count={}, _data_runs={}, _content={}, _data_runs_sorted={})'.format(
+            self.name, self.size, self.alloc_size, self.cluster_count, self._data_runs, self._content, self._data_runs_sorted)
 
 class Attribute():
     '''Represents an attribute, header and content. Independently the type of
