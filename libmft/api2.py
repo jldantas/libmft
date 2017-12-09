@@ -548,6 +548,7 @@ class MFT():
                   }
 
     def __init__(self, file_pointer, mft_config=None):
+        #TODO redo documentation
         '''The initialization process takes a file like object "file_pointer"
         and loads it in the internal structures. "use_cores" can be definied
         if multiple cores are to be used. The "size" argument is the size
@@ -598,10 +599,8 @@ class MFT():
         else:
             extras = []
 
-        for number in _chain([entry_number], extras):
-            print(number)
-
-        pass
+        for number in _chain((entry_number,), extras):
+            pass
 
 
 
@@ -625,10 +624,6 @@ class MFT():
 
         return self._read_full_entry(search_for)
 
-
-
-
-        return self.entries[index]
 
     def __len__(self):
         return len(self.entries)
