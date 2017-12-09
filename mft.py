@@ -2,7 +2,7 @@ import copy
 import itertools
 
 #import libmft.api
-import libmft.api2
+import libmft.api
 from libmft.flagsandtypes import AttrTypes, FileInfoFlags, MftUsageFlags
 
 #test = "./mft_samples/MFT_singlefile.bin"
@@ -197,7 +197,7 @@ def test_data(mft_config):
 
 def main():
     #mft_config = copy.deepcopy(libmft.api.MFT.mft_config)
-    mft_config = copy.deepcopy(libmft.api2.MFT.mft_config)
+    mft_config = copy.deepcopy(libmft.api.MFT.mft_config)
     mft_config["attributes"]["load_dataruns"] = False
     mft_config["attributes"]["object_id"] = False
     mft_config["attributes"]["sec_desc"] = False
@@ -208,8 +208,10 @@ def main():
     mft_config["attributes"]["ea_info"] = False
     mft_config["attributes"]["ea"] = False
     mft_config["attributes"]["log_tool_str"] = False
+    mft_config["attributes"]["attr_list"] = False
     # mft_config["datastreams"] = {"enable" : True,
     #                              "load_content" : True
+
 
     #stress_filename(mft_config)
     #stress_ads(mft_config)
@@ -217,7 +219,7 @@ def main():
 
 
     with open(test, "rb") as mft_file:
-        mft = libmft.api2.MFT(mft_file, mft_config)
+        mft = libmft.api.MFT(mft_file, mft_config)
 
         print(len(mft))
         a = mft[75429]
@@ -225,6 +227,9 @@ def main():
             if not stream.is_resident():
                 stream.get_dataruns()
         print(mft[75429])
+
+        # for a in mft:
+        #     pass
 
 
     # with open(test, "rb") as mft_file:
