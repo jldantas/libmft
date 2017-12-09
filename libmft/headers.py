@@ -210,7 +210,7 @@ class NonResidentAttrHeader():
         self.alloc_sstream = temp[4]
         self.curr_sstream = temp[5]
         self.init_sstream = temp[6]
-        if mft_config["load_dataruns"]:
+        if mft_config["attributes"]["load_dataruns"]:
             self.data_runs = DataRuns(header_view[self.rl_offset:])
         else:
             self.data_runs = None

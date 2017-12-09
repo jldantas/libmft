@@ -59,6 +59,11 @@ class HeaderError(MFTException):
         super().__init__(msg, None, entry_number)
         pass
 
+class DataStreamError(MFTException):
+    def __init__(self, msg, entry_number=-1):
+        super().__init__(msg, None, entry_number)
+        
+
 class HeaderException(MFTException):
     def __init__(self, msg, entry_number):
         '''All exceptions, at a minimum, have to have a message'''

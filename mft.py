@@ -16,10 +16,10 @@ from libmft.flagsandtypes import AttrTypes, FileInfoFlags, MftUsageFlags
 #test = "./mft_samples/MFT_simplefsdeletedfolder.bin"
 #test = "../full_sample.bin"
 
-#test = "../my_mft.bin"
+test = "../my_mft.bin"
 
 #test = "C:/cases/full_sample.bin"
-test = "C:/cases/my_mft.bin"
+#test = "C:/cases/my_mft.bin"
 #test = "C:/Users/Julio/Downloads/MFT.bin"
 
 def get_info_data_stream(entry, data_stream):
@@ -198,18 +198,18 @@ def test_data(mft_config):
 def main():
     #mft_config = copy.deepcopy(libmft.api.MFT.mft_config)
     mft_config = copy.deepcopy(libmft.api2.MFT.mft_config)
-    mft_config["load_attr_list"] = False
-    mft_config["load_oject_id"] = False
-    mft_config["load_sec_desc"] = False
-    mft_config["load_idx_root"] = False
-    mft_config["load_idx_alloc"] = False
-    mft_config["load_bitmap"] = False
-    mft_config["load_reparse"] = False
-    mft_config["load_ea_info"] = False
-    mft_config["load_ea"] = False
-    mft_config["load_log_tool_str"] = False
-    mft_config["load_slack"] = False
-    mft_config["load_dataruns"] = False
+    mft_config["attributes"]["load_dataruns"] = False
+    mft_config["attributes"]["object_id"] = False
+    mft_config["attributes"]["sec_desc"] = False
+    mft_config["attributes"]["idx_root"] = False
+    mft_config["attributes"]["idx_alloc"] = False
+    mft_config["attributes"]["bitmap"] = False
+    mft_config["attributes"]["reparse"] = False
+    mft_config["attributes"]["ea_info"] = False
+    mft_config["attributes"]["ea"] = False
+    mft_config["attributes"]["log_tool_str"] = False
+    # mft_config["datastreams"] = {"enable" : True,
+    #                              "load_content" : True
 
     #stress_filename(mft_config)
     #stress_ads(mft_config)
@@ -217,7 +217,14 @@ def main():
 
 
     with open(test, "rb") as mft_file:
-        mft = libmft.api2.MFT(mft_file)
+        mft = libmft.api2.MFT(mft_file, mft_config)
+
+        print(len(mft))
+        a = mft[75429]
+        for stream in a.data_streams:
+            if not stream.is_resident():
+                stream.get_dataruns()
+        print(mft[75429])
 
 
     # with open(test, "rb") as mft_file:
