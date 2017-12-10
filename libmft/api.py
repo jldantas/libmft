@@ -317,9 +317,6 @@ class MFTEntry():
             self.data_streams.append(stream)
         stream.add_data_attribute(data_attr)
 
-        #TODO datastream loads itself, we also need to copy a data stream
-
-
     def _add_attribute(self, attr):
         '''Adds one attribute to the list of attributes. Checks if the the entry
         already has another entry of the attribute and if not, creates the necessary
@@ -368,68 +365,77 @@ class MFTEntry():
         else:
             return None
 
-    def get_data_size(self, ads_name=None):
+    def get_datastream(self, name=None):
         '''Returns the size of the data or an ads. The ads has to be the name of the file'''
-        data_attrs = self.get_attributes(AttrTypes.DATA)
-        data_size = 0
-
-        if data_attrs is not None:
-            #select the correct attributes of the file
-            if ads_name is None:
-                relevant_attr = [a for a in data_attrs if a.header.attr_name is None]
-            else:
-                relevant_attr = [a for a in data_attrs if a.header.attr_name == ads_name]
-            #once we the right attributes, process and find the size
-            for attr in relevant_attr:
-                if attr.is_non_resident():
-                    if not attr.header.non_resident_header.start_vcn:
-                        data_size = attr.header.non_resident_header.curr_sstream
-                        break
-                else:
-                    data_size = len(attr.content)
-                    break
-
-        return data_size
+        return self._find_datastream(name)
 
     def get_datastream_names(self):
+        '''Returns a set with the datastream names. If there is no datastream,
+        returns None
+        '''
         ads_names = set()
 
-        data_attrs = self.get_attributes(AttrTypes.DATA)
-        if data_attrs is not None:
-            for data_attr in data_attrs:
-                ads_names.add(data_attr.header.attr_name)
+        for stream in self.data_streams:
+            ads_names.add(stream.name)
 
         if len(ads_names):
             return ads_names
         else:
             return None
 
-    def has_ads(self):
-        data_attrs = self.get_attributes(AttrTypes.DATA)
-        if data_attrs is not None:
-            for a in data_attrs:
-                if a.header.attr_name:
-                    return True
-            return False
-        else:
-            return False
+    def get_main_filename_attr(self):
+        '''Returns the main filename attribute of the entry. This is found
+        searching for the lowest attribute id, once that has been found, it loops
+        again over the filenames attributes searching other attributes that represent
+        the same name and return the best one possible based on the type of the
+        name (name_type)
 
-    def get_names(self):
-        names = set()
+        '''
+        fn_attrs = self.get_attributes(AttrTypes.FILE_NAME)
+        high_attr_id = 0xFFFFFFFF
+        main_fn = None
 
-        attrs = self.get_attributes(AttrTypes.FILE_NAME)
-        if attrs is not None:
-            names = {attr.content.name for attr in attrs}
+        for fn_attr in fn_attrs:
+            if fn_attr.header.attr_id < high_attr_id:
+                main_fn = fn_attr
+                high_attr_id = fn_attr.header.attr_id
 
-        return names
+        #TODO is this necessary? Maybe the first name is always the with with the biggest namespace
+        for fn_attr in fn_attrs:
+            if main_fn.content.parent_ref == fn_attr.content.parent_ref and \
+                main_fn.content.parent_seq == fn_attr.content.parent_seq and \
+                fn_attr.content.name_type.value < main_fn.content.name_type.value:
+                    main_fn = fn_attr
+
+        return main_fn
+
+    def get_unique_filename_attrs(self):
+        fn_attrs = self.get_attributes(AttrTypes.FILE_NAME)
+        control = None
+        result = None
+
+        if fn_attrs is not None:
+            control = {}
+            for fn in fn_attrs:
+                temp = (fn.content.parent_ref, fn.content.parent_seq)
+                if temp not in control:
+                    control[temp] = fn
+                else:
+                    if fn.content.name_type.value < control[temp].content.name_type.value:
+                        control[temp] = fn
+            result = [fn for fn in control.values()]
+
+        return result
 
     def is_deleted(self):
+        '''Returns True if an entry is marked as deleted, otherwise, returns False.'''
         if self.header.usage_flags & MftUsageFlags.IN_USE:
             return False
         else:
             return True
 
     def is_directory(self):
+        '''Returns True is the entry is a directory, otherwise, returns False.'''
         if self.header.usage_flags & MftUsageFlags.DIRECTORY:
             return True
         else:
@@ -574,12 +580,10 @@ class MFT():
         MOD_LOGGER.info("Mapping related entries...")
         for i, stub in enumerate(temp):
             if stub is not None:
-                if not stub.base_record_ref:
-                    self._number_valid_entries += 1
-                else:
-                    if is_related2(temp[stub.base_record_ref], stub): #stub.base_record_ref is not 0
-                        self._entries_parent_child[stub.base_record_ref].append(stub.mft_record)
-                        self._entries_child_parent[stub.mft_record] = stub.base_record_ref
+                self._number_valid_entries += 1
+                if not stub.base_record_ref and is_related2(temp[stub.base_record_ref], stub): #stub.base_record_ref is not 0
+                    self._entries_parent_child[stub.base_record_ref].append(stub.mft_record)
+                    self._entries_child_parent[stub.mft_record] = stub.base_record_ref
             else:
                 self._empty_entries.add(i)
 
@@ -609,8 +613,9 @@ class MFT():
 
         for i in range(0, _get_file_size(self.file_pointer), self.mft_entry_size):
             mft_record_n = int(i/self.mft_entry_size)
-            if returned >= self._number_valid_entries:
-                break
+            if returned > self._number_valid_entries:
+                #TODO customize this exception
+                raise Exception("Something is wrong...")
             if mft_record_n in self._empty_entries or mft_record_n in self._entries_child_parent:
                 continue
             else:
@@ -618,15 +623,15 @@ class MFT():
                 yield self[mft_record_n]
 
 
-    @lru_cache(128)
+    @lru_cache(512)
     def __getitem__(self, index):
         '''Return the specific MFT entry. In case of an empty MFT, it will return
         None'''
         search_for = index
         if search_for in self._empty_entries:
-            raise ValueError
+            raise ValueError(f"Entry {index} is empty.")
         if search_for in self._entries_child_parent:
-            raise ValueError
+            raise ValueError(f"Entry {index} is a child entry.")
             #search_for = self._entries_child_parent[search_for]
 
         return self._read_full_entry(search_for)

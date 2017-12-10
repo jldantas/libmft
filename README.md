@@ -93,6 +93,7 @@ P.S.: The implementation I used can be seen in the file parallel.py
 - Entries not in use and having no attributes are no longer loaded
 - Removed the STANDARD_INFORMATION versions and "class ID" fields
 - Removed the FILE_NAME "allocated size" and "real size"
+- Implemented Datastreams
 
 ## References:
 
