@@ -63,7 +63,7 @@ from libmft.attrcontent import StandardInformation, FileName, IndexRoot, Data, \
     EaInformation, LoggedToolStream
 from libmft.headers import MFTHeader, ResidentAttrHeader, NonResidentAttrHeader,  \
     AttributeHeader, DataRuns
-from libmft.exceptions import MFTEntryException, FixUpError, DataStreamError
+from libmft.exceptions import FixUpError, DataStreamError, EntryError, MFTError, HeaderError
 
 MOD_LOGGER = logging.getLogger(__name__)
 
@@ -252,8 +252,6 @@ class MFTEntry():
         '''
         self.header, self.attrs = header, attrs
         self.data_streams = None
-        #--------------
-
 
     @classmethod
     def create_from_binary(cls, mft_config, binary_data, entry_number):
@@ -278,7 +276,12 @@ class MFTEntry():
 
         #no check is performed if an entry is empty
         #the _MFTEntryStub code SHOULD detect if there is an empty entry
-        header = MFTHeader.create_from_binary(bin_view[:MFTHeader.get_static_content_size()])
+        try:
+            header = MFTHeader.create_from_binary(mft_config, bin_view[:MFTHeader.get_static_content_size()])
+        except HeaderError as e:
+            e.update_entry_number(entry_number)
+            e.update_entry_binary(binary_data)
+            raise
         entry = cls(header, {})
         entry.data_streams = []
 
@@ -286,7 +289,7 @@ class MFTEntry():
             MOD_LOGGER.warning(f"The MFT entry number doesn't match. {entry_number} != {header.mft_record}")
         if len(binary_data) != header.entry_alloc_len:
             MOD_LOGGER.error(f"Expected MFT size is different than entry size.")
-            raise MFTEntryException("Expected MFT size is different than entry size.", entry_number)
+            raise EntryError(f"Expected MFT size ({len(binary_data)}) is different than entry size ({header.entry_alloc_len}).", binary_data, entry_number)
         if mft_config["apply_fixup_array"]:
             try:
                 apply_fixup_array(bin_view, header.fx_offset, header.fx_count, header.entry_alloc_len)
@@ -338,6 +341,7 @@ class MFTEntry():
             if not attr.header.attr_type_id is AttrTypes.DATA:
                 self._add_attribute(attr)
             else:
+                #print(attr)
                 self._add_datastream(attr)
             offset += len(attr)
 
@@ -510,6 +514,7 @@ class MFT():
     '''
     mft_config = {"entry_size" : 0, #0 for autodetect
                   "apply_fixup_array" : True,
+                  "ignore_signature_check": False, #does not check if the signature (FILE or BAD) is valid
                   "attributes" : {},
                   "datastreams": {}
                  }
@@ -551,6 +556,7 @@ class MFT():
         self._number_valid_entries = 0
 
         if not self.mft_entry_size: #if entry size is zero, try to autodetect
+            MOD_LOGGER.info("Trying to detect MFT size entry")
             self.mft_entry_size = MFT._find_mft_size(file_pointer)
 
         self._load_stub_info()
@@ -581,7 +587,7 @@ class MFT():
         for i, stub in enumerate(temp):
             if stub is not None:
                 self._number_valid_entries += 1
-                if not stub.base_record_ref and is_related2(temp[stub.base_record_ref], stub): #stub.base_record_ref is not 0
+                if stub.base_record_ref and is_related2(temp[stub.base_record_ref], stub): #stub.base_record_ref is not 0
                     self._entries_parent_child[stub.base_record_ref].append(stub.mft_record)
                     self._entries_child_parent[stub.mft_record] = stub.base_record_ref
             else:
@@ -615,7 +621,7 @@ class MFT():
             mft_record_n = int(i/self.mft_entry_size)
             if returned > self._number_valid_entries:
                 #TODO customize this exception
-                raise Exception("Something is wrong...")
+                raise MFTError("Something is wrong...")
             if mft_record_n in self._empty_entries or mft_record_n in self._entries_child_parent:
                 continue
             else:
@@ -642,20 +648,22 @@ class MFT():
 
     @staticmethod
     def _find_mft_size(file_object):
-        sizes = [1024, 4096, 512, 2048]
+        sizes = [1024, 4096, 512, 2048, 256, 8192, 1]
         sigs = [member.value for name, member in MftSignature.__members__.items()]
 
         first_sig = file_object.read(4)
         second_sig = None
         if first_sig not in sigs:
-            #TODO error handling
-            print("SIGNATURE NOT FOUND")
+            raise MFTError("Entry signature not found.")
         for size in sizes:
             file_object.seek(size, 0)
             second_sig = file_object.read(4)
             if second_sig in sigs:
-                #TODO add logging
+                MOD_LOGGER.info(f"MFT entry size found = {size}")
                 break
         file_object.seek(0)
+
+        if size == 1:
+            raise MFTError("Could not find MFT entry size. Please provide one manually.")
 
         return size

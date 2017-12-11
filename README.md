@@ -58,7 +58,11 @@ Anyway, if anyone has a suggestion, feel free to let me know.
 
 P.S.: The implementation I used can be seen in the file parallel.py
 
-## TODO/Features/Roadmap?
+## TODO/Roadmap?
+
+- Find a way of optimizing the datetime conversion (numpy datetime?)
+
+## Features
 
 ### Basic
 
@@ -94,6 +98,11 @@ P.S.: The implementation I used can be seen in the file parallel.py
 - Removed the STANDARD_INFORMATION versions and "class ID" fields
 - Removed the FILE_NAME "allocated size" and "real size"
 - Implemented Datastreams
+
+## Known problems
+
+- If you try to set the date for a year > 9999, python will fire a Overflow exception. This is python bound unless we change
+the datetime module to a third party
 
 ## References:
 

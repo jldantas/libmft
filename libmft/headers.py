@@ -9,7 +9,7 @@ import logging
 
 from libmft.flagsandtypes import AttrTypes, MftSignature, AttrFlags, MftUsageFlags
 from libmft.util.functions import get_file_reference
-from libmft.exceptions import HeaderError, AttrHeaderException
+from libmft.exceptions import HeaderError#, AttrHeaderException
 
 MOD_LOGGER = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ class MFTHeader():
         return cls._REPR.size
 
     @classmethod
-    def create_from_binary(cls, binary_view):
+    def create_from_binary(cls, mft_config, binary_view):
         '''Creates a new object MFTHeader from a binary stream. The binary
         stream can be represented by a byte string, bytearray or a memoryview of the
         bytearray.
@@ -83,15 +83,19 @@ class MFTHeader():
         '''
         header = cls._REPR.unpack(binary_view[:cls._REPR.size])
         nw_obj = cls()
+        baad = None
 
-        if header[0] == b"FILE":
-            baad = False
-        elif header[0] == b"BAAD":
-            baad = True
-        else:
-            raise HeaderError("Entry has no valid signature.")
+        if not mft_config["ignore_signature_check"]:
+            if header[0] == b"FILE":
+                baad = False
+            elif header[0] == b"BAAD":
+                baad = True
+            else:
+                raise HeaderError("Entry has no valid signature.", "MFTHeader")
         if header[1] < MFTHeader.get_static_content_size(): #header[1] is fx_offset
             raise HeaderError("Fix up array begins within the header.", header[12])
+        if header[6] < cls._REPR.size: #first attribute offset < header size
+            raise HeaderError("First attribute offset points to inside of the header.")
         if header[8] > header[9]: #entry_len > entry_alloc_len
             raise HeaderError("Logical size of the MFT is bigger than MFT allocated size.", header[12])
 

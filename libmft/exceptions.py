@@ -2,14 +2,11 @@
 '''
 Exceptions hierachy
 - MFTException
+- EntryError
+
 -- HeaderError
 -- FixUpError
 
-
---- HeaderException
------- MFTHeaderException
------- AttrHeaderException
---- AttrContentException
 '''
 
 #TODO configure this based on the level of logging
@@ -25,6 +22,10 @@ def set_message_level(level):
     _MESSAGE_LEVEL = level
 
 class MFTException(Exception):
+    '''Base exception for all the exceptions defined by the library.'''
+    pass
+
+class EntryError(MFTException):
     '''Base exception for all the exceptions defined by the library.'''
     def __init__(self, msg, entry_binary, entry_number):
         '''All exceptions, at a minimum, have to have a message and the number
@@ -49,46 +50,25 @@ class MFTException(Exception):
 
         return "".join((super().__str__(), msg))
 
+class MFTError(MFTException):
+    pass
+
 class FixUpError(MFTException):
     def __init__(self, msg):
         super().__init__(msg, None, None)
         pass
 
-class HeaderError(MFTException):
-    def __init__(self, msg, entry_number=-1):
-        super().__init__(msg, None, entry_number)
-        pass
+class HeaderError(EntryError):
+    def __init__(self, msg, header_name):
+        super().__init__(msg, None, -1)
+        self._header_name = header_name
+
+    def __str__(self):
+        basic_info = super().__str__()
+        msg = f"\nHeader type: {self._header_name}"
+
+        return "".join((basic_info, msg))
 
 class DataStreamError(MFTException):
     def __init__(self, msg, entry_number=-1):
         super().__init__(msg, None, entry_number)
-        
-
-class HeaderException(MFTException):
-    def __init__(self, msg, entry_number):
-        '''All exceptions, at a minimum, have to have a message'''
-        super().__init__(msg, entry_number)
-
-class MFTHeaderException(HeaderException):
-    def __init__(self, msg, entry_number=-1):
-        '''All exceptions, at a minimum, have to have a message'''
-        super().__init__(msg, entry_number)
-
-class AttrHeaderException(HeaderException):
-    def __init__(self, msg, entry_number=-1):
-        '''All exceptions, at a minimum, have to have a message'''
-        super().__init__(msg, entry_number)
-
-class AttrContentException(MFTException):
-    def __init__(self, msg, entry_number=-1):
-        '''All exceptions, at a minimum, have to have a message'''
-        super().__init__(msg, entry_number)
-
-class MFTEntryException(MFTException):
-    def __init__(self, msg, entry_number):
-        '''All exceptions, at a minimum, have to have a message'''
-        super().__init__(msg, entry_number)
-
-class FixUpException(MFTException):
-    def __init__(self, msg):
-        pass

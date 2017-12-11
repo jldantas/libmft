@@ -12,7 +12,7 @@ import logging
 from itertools import chain as _chain
 
 from libmft.util.functions import convert_filetime, get_file_reference
-from libmft.exceptions import AttrContentException
+#from libmft.exceptions import AttrContentException
 from libmft.flagsandtypes import AttrTypes, NameType, FileInfoFlags, \
     IndexEntryFlags, VolumeFlags, ReparseType, ReparseFlags
 
@@ -66,10 +66,6 @@ class StandardInformation():
         '''
         self.timestamps = {}
 
-        # self.timestamps["created"], self.timestamps["changed"], \
-        # self.timestamps["mft_change"], self.timestamps["accessed"], \
-        # self.flags, self.max_n_ver, self.ver_n, self.class_id, self.owner_id, \
-        # self.security_id, self.quota_charged, self.usn = content
         self.timestamps["created"], self.timestamps["changed"], \
         self.timestamps["mft_change"], self.timestamps["accessed"], \
         self.flags, self.owner_id, \
@@ -148,9 +144,6 @@ class StandardInformation():
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        # return self.__class__.__name__ + '(timestamps={}, flags={!s}, max_n_ver={}, ver_n={}, class_id={}, owner_id={}, security_id={}, quota_charged={}, usn={})'.format(
-        #     self.timestamps, self.flags, self.max_n_ver, self.ver_n, self.class_id,
-        #     self.owner_id, self.security_id, self.quota_charged, self.usn)
         return self.__class__.__name__ + '(timestamps={}, flags={!s}, owner_id={}, security_id={}, quota_charged={}, usn={})'.format(
             self.timestamps, self.flags,
             self.owner_id, self.security_id, self.quota_charged, self.usn)
