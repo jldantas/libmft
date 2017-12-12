@@ -95,7 +95,7 @@ class Datastream():
         if data_attr.header.attr_type_id is not AttrTypes.DATA:
             raise DataStreamError("Invalid attribute. A Datastream deals only with DATA attributes")
         if data_attr.header.attr_name != self.name:
-            raise DataStreamError("Data from a different stream 'f{data_attr.header.attr_name}' cannot be add to this stream")
+            raise DataStreamError(f"Data from a different stream '{data_attr.header.attr_name}' cannot be add to this stream")
 
         if data_attr.header.is_non_resident():
             nonr_header = data_attr.header.non_resident_header
@@ -250,8 +250,7 @@ class MFTEntry():
                 this entry
             slack (binary string) - the binary stream with the slack data
         '''
-        self.header, self.attrs = header, attrs
-        self.data_streams = None
+        self.header, self.attrs, self.data_streams = header, attrs, []
 
     @classmethod
     def create_from_binary(cls, mft_config, binary_data, entry_number):
@@ -283,7 +282,6 @@ class MFTEntry():
             e.update_entry_binary(binary_data)
             raise
         entry = cls(header, {})
-        entry.data_streams = []
 
         if header.mft_record != entry_number:
             MOD_LOGGER.warning(f"The MFT entry number doesn't match. {entry_number} != {header.mft_record}")
@@ -345,6 +343,10 @@ class MFTEntry():
                 self._add_datastream(attr)
             offset += len(attr)
 
+        #TODO there is always a valid datastream?
+        # if not self.data_stream:
+        #     self.data_stream.append(Datastream())
+
     def merge_entries(self, source_entry):
         '''Merge one entry attributes and datastreams with the current entry.
         '''
@@ -399,17 +401,18 @@ class MFTEntry():
         high_attr_id = 0xFFFFFFFF
         main_fn = None
 
-        for fn_attr in fn_attrs:
-            if fn_attr.header.attr_id < high_attr_id:
-                main_fn = fn_attr
-                high_attr_id = fn_attr.header.attr_id
-
-        #TODO is this necessary? Maybe the first name is always the with with the biggest namespace
-        for fn_attr in fn_attrs:
-            if main_fn.content.parent_ref == fn_attr.content.parent_ref and \
-                main_fn.content.parent_seq == fn_attr.content.parent_seq and \
-                fn_attr.content.name_type.value < main_fn.content.name_type.value:
+        if fn_attrs is not None:
+            for fn_attr in fn_attrs:
+                if fn_attr.header.attr_id < high_attr_id:
                     main_fn = fn_attr
+                    high_attr_id = fn_attr.header.attr_id
+
+            #TODO is this necessary? Maybe the first name is always the with with the biggest namespace
+            for fn_attr in fn_attrs:
+                if main_fn.content.parent_ref == fn_attr.content.parent_ref and \
+                    main_fn.content.parent_seq == fn_attr.content.parent_seq and \
+                    fn_attr.content.name_type.value < main_fn.content.name_type.value:
+                        main_fn = fn_attr
 
         return main_fn
 
@@ -633,14 +636,20 @@ class MFT():
     def __getitem__(self, index):
         '''Return the specific MFT entry. In case of an empty MFT, it will return
         None'''
-        search_for = index
-        if search_for in self._empty_entries:
+        if index in self._empty_entries:
             raise ValueError(f"Entry {index} is empty.")
-        if search_for in self._entries_child_parent:
+        if index in self._entries_child_parent:
             raise ValueError(f"Entry {index} is a child entry.")
-            #search_for = self._entries_child_parent[search_for]
 
-        return self._read_full_entry(search_for)
+        return self._read_full_entry(index)
+        # search_for = index
+        # if search_for in self._empty_entries:
+        #     raise ValueError(f"Entry {index} is empty.")
+        # if search_for in self._entries_child_parent:
+        #     raise ValueError(f"Entry {index} is a child entry.")
+        #     #search_for = self._entries_child_parent[search_for]
+        #
+        # return self._read_full_entry(search_for)
 
 
     def __len__(self):

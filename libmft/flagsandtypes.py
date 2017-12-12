@@ -107,6 +107,7 @@ class VolumeFlags(enum.IntFlag):
     MODIFIED_BY_CHKDISK = 0x8000
 
 class ReparseFlags(enum.IntFlag):
+    '''Represents the possible flags for the ReparsePoint class.'''
     RESERVED = 0x1
     IS_ALIAS = 0x2
     IS_HIGH_LATENCY = 0x4

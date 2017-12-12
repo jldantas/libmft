@@ -98,6 +98,7 @@ P.S.: The implementation I used can be seen in the file parallel.py
 - Removed the STANDARD_INFORMATION versions and "class ID" fields
 - Removed the FILE_NAME "allocated size" and "real size"
 - Implemented Datastreams
+- Updated documentation
 
 ## Known problems
 

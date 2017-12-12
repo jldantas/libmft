@@ -10,13 +10,13 @@ behaviour.
 import struct
 import logging
 from itertools import chain as _chain
+from operator import getitem as _getitem
 
 from libmft.util.functions import convert_filetime, get_file_reference
-#from libmft.exceptions import AttrContentException
 from libmft.flagsandtypes import AttrTypes, NameType, FileInfoFlags, \
     IndexEntryFlags, VolumeFlags, ReparseType, ReparseFlags
 
-MOD_LOGGER = logging.getLogger(__name__)
+_MOD_LOGGER = logging.getLogger(__name__)
 
 #TODO verify, in general, if it is not better to encode the data within the
 #attributes as tuple or list and use properties to access by name
@@ -94,8 +94,10 @@ class StandardInformation():
         Returns:
             StandardInformation: New object using hte binary stream as source
         '''
+        _MOD_LOGGER.debug("Unpacking STANDARD_INFORMATION content")
         main_content = cls._REPR.unpack(binary_view[:cls._REPR.size])
         if len(binary_view) != cls._REPR.size:
+            _MOD_LOGGER.debug("Unpacking NTFS 3 extesion")
             ntfs3_extension = cls._REPR_NFTS_3_EXTENSION.unpack(binary_view[cls._REPR.size:])
         else:
             ntfs3_extension = (None, None, None, None)
@@ -107,6 +109,7 @@ class StandardInformation():
         nw_obj.timestamps["mft_change"] = convert_filetime(nw_obj.timestamps["mft_change"])
         nw_obj.timestamps["accessed"] = convert_filetime(nw_obj.timestamps["accessed"])
         nw_obj.flags = FileInfoFlags(nw_obj.flags)
+        _MOD_LOGGER.debug("StandardInformation object created successfully")
 
         return nw_obj
 
@@ -145,8 +148,8 @@ class StandardInformation():
     def __repr__(self):
         'Return a nicely formatted representation string'
         return self.__class__.__name__ + '(timestamps={}, flags={!s}, owner_id={}, security_id={}, quota_charged={}, usn={})'.format(
-            self.timestamps, self.flags,
-            self.owner_id, self.security_id, self.quota_charged, self.usn)
+            self.timestamps, self.flags, self.owner_id, self.security_id,
+            self.quota_charged, self.usn)
 
 #******************************************************************************
 # ATTRIBUTE_LIST ATTRIBUTE
@@ -183,7 +186,7 @@ class AttributeListEntry():
                 [7] (int) - attribute id
                 [8] (str) - name
         '''
-        self.attr_type, self.entry_len, name_len, self.name_offset, \
+        self.attr_type, self.entry_len, _, self.name_offset, \
         self.start_vcn, self.file_ref, self.file_seq, self.attr_id, self.name = content
 
     def _get_name_length(self):
@@ -216,6 +219,7 @@ class AttributeListEntry():
         Returns:
             AttributeListEntry: New object using hte binary stream as source
         '''
+        _MOD_LOGGER.debug("Unpacking ATTRIBUTE_LIST content")
         content = cls._REPR.unpack(binary_view[:cls._REPR.size])
         nw_obj = cls()
 
@@ -228,6 +232,7 @@ class AttributeListEntry():
         nw_obj.file_ref, nw_obj.file_seq, nw_obj.attr_id, nw_obj.name = \
         AttrTypes(content[0]), content[1], content[3], content[4], \
         file_ref, file_seq, content[6], name
+        _MOD_LOGGER.debug("AttributeListEntry object created successfully")
 
         return nw_obj
 
@@ -252,7 +257,6 @@ class AttributeList():
         '''Creates an AttributeList content representation. Content has to be a
         list of AttributeListEntry that will be referred by the object. To create
         from a binary string, use the function 'create_from_binary' '''
-        #TODO change from list to dict?
         self.attr_list = content
 
     @classmethod
@@ -264,20 +268,23 @@ class AttributeList():
 
         Args:
             binary_view (memoryview of bytearray) - A binary stream with the
-                information of the attribute
+                information of multiple AttributeListEntry
 
         Returns:
-            AttributeList: New object using hte binary stream as source
+            AttributeList: New object using the binary stream as source
         '''
         attr_list = []
         offset = 0
 
         while True:
+            _MOD_LOGGER.debug("Creating AttributeListEntry object from binary stream...")
             entry = AttributeListEntry.create_from_binary(binary_view[offset:])
             offset += entry.entry_len
             attr_list.append(entry)
             if offset >= len(binary_view):
                 break
+            _MOD_LOGGER.debug(f"Next AttributeListEntry offset = {offset}")
+        _MOD_LOGGER.debug("AttributeListEntry object created successfully")
 
         return cls(attr_list)
 
@@ -291,7 +298,8 @@ class AttributeList():
         return iter(self.attr_list)
 
     def __getitem__(self, index):
-        return self.attr_list[index]
+        '''Return the AttributeListEntry at the specified position'''
+        return _getitem(self.attr_list, index)
 
     def __repr__(self):
         'Return a nicely formatted representation string'
@@ -302,17 +310,50 @@ class AttributeList():
 # OBJECT_ID ATTRIBUTE
 #******************************************************************************
 class UID():
+    '''This class represents an UID as defined by Microsoft and used in the
+    MFT entries. Consult https://msdn.microsoft.com/en-us/library/cc227517.aspx
+    for information.'''
     _REPR = struct.Struct("<2Q")
     ''' Object ID - 8
         Volume ID - 8
-        https://msdn.microsoft.com/en-us/library/cc227517.aspx
     '''
-    def __init__(self, uid_view):
-        self.object_id, self.volume_id = UID._REPR.unpack(uid_view[:UID._REPR.size])
+    def __init__(self, content=(None,)*2):
+        '''Creates an UID object. The content has to be an iterable
+        with precisely 2 elements in order.
+        If content is not provided, a 2 element tuple, where all elements are
+        None, is the default argument.
+
+        Args:
+            content (iterable), where:
+                [0] (int) - object id
+                [1] (int) - volume_id
+        '''
+        self.object_id, self.volume_id = content
 
     @classmethod
     def get_uid_size(cls):
+        '''Returns the static size of the content never taking in consideration
+        variable fields, for example, names.
+
+        Returns:
+            int: The size of the content, in bytes
+        '''
         return cls._REPR.size
+
+    @classmethod
+    def create_from_binary(cls, binary_view):
+        '''Creates a new object UID from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray.
+
+        Args:
+            binary_view (memoryview of bytearray) - A binary stream with the
+                information of an UID
+
+        Returns:
+            UID: New object using the binary stream as source
+        '''
+        return cls(cls._REPR.unpack(binary_view[:cls._REPR.size]))
 
     #TODO comparison methods
 
@@ -322,17 +363,43 @@ class UID():
             self.volume_id, self.object_id)
 
 class ObjectID():
-    def __init__(self,  content=(None,)*4):
-        uid_size = UID.get_uid_size()
+    '''This class represents an Object ID.'''
 
+    def __init__(self,  content=(None,)*4):
+        '''Creates a StandardInformation object. The content has to be an iterable
+        with precisely 4 elements in order.
+        If content is not provided, a 4 element tuple, where all elements are
+        None, is the default argument.
+
+        Args:
+            content (iterable), where:
+                [0] (UID) - object id
+                [1] (UID) - birth volume id
+                [2] (UID) - virth object id
+                [3] (UID) - birth domain id
+        '''
         self.object_id, self.birth_vol_id, self.birth_object_id, \
         self.birth_domain_id = content
 
     @classmethod
     def create_from_binary(cls, binary_view):
+        '''Creates a new object ObjectID from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray.
+
+        Args:
+            binary_view (memoryview of bytearray) - A binary stream with the
+                information of an ObjectID
+
+        Returns:
+            ObjectID: New object using the binary stream as source
+        '''
         uid_size = UID.get_uid_size()
 
-        uids = [UID(binary_view[i*uid_size:(i+1)*uid_size]) if i * uid_size < len(binary_view) else None for i in range(0,4)]
+        #some entries might not have all four ids, this line forces
+        #to always create 4 elements, so contruction is easier
+        uids = [UID.create_from_binary(binary_view[i*uid_size:(i+1)*uid_size]) if i * uid_size < len(binary_view) else None for i in range(0,4)]
+        _MOD_LOGGER.debug("ObjectID object created successfully")
 
         return cls(uids)
 
@@ -345,16 +412,35 @@ class ObjectID():
 # VOLUME_NAME ATTRIBUTE
 #******************************************************************************
 class VolumeName():
+    '''This class represents a VolumeName attribute.'''
     def __init__(self, name):
+        '''Initialize a VolumeName object, receives the name of the volume:
+
+        Args:
+            name (str) - name of the volume
+        '''
         self.name = name
 
     @classmethod
     def create_from_binary(cls, binary_view):
+        '''Creates a new object VolumeName from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray.
+
+        Args:
+            binary_view (memoryview of bytearray) - A binary stream with the
+                information of an VolumeName
+
+        Returns:
+            VolumeName: New object using the binary stream as source
+        '''
         name = binary_view.tobytes().decode("utf_16_le")
+        _MOD_LOGGER.debug("ObjectID object created successfully")
 
         return cls(name)
 
     def __len__(self):
+        '''Returns the length of the name'''
         return len(self.name)
 
     def __repr__(self):
@@ -366,6 +452,8 @@ class VolumeName():
 # VOLUME_INFORMATION ATTRIBUTE
 #******************************************************************************
 class VolumeInformation():
+    '''This class represents a VolumeInformation attribute.'''
+
     _REPR = struct.Struct("<Q2BH")
     ''' Unknow - 8
         Major version number - 1
@@ -373,14 +461,41 @@ class VolumeInformation():
         Volume flags - 2
     '''
 
-    def __init__(self, content=(None,)*4):
-        #self._unknow = temp[0]
-        _, self.major_ver, self.minor_ver, self.vol_flags = content
-        self.vol_flags = VolumeFlags(self.vol_flags)
+    def __init__(self, content=(None,)*3):
+        '''Creates a VolumeInformation object. The content has to be an iterable
+        with precisely 3 elements in order.
+        If content is not provided, a 3 element tuple, where all elements are
+        None, is the default argument
+
+        Args:
+            content (iterable), where:
+                [0] (int) - major version
+                [1] (int) - minor version
+                [2] (VolumeFlags) - Volume flags
+        '''
+        self.major_ver, self.minor_ver, self.vol_flags = content
 
     @classmethod
     def create_from_binary(cls, binary_view):
-        return cls(cls._REPR.unpack(binary_view))
+        '''Creates a new object VolumeInformation from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray.
+
+        Args:
+            binary_view (memoryview of bytearray) - A binary stream with the
+                information of an VolumeInformation
+
+        Returns:
+            VolumeInformation: New object using the binary stream as source
+        '''
+        nw_obj = cls()
+        content = cls._REPR.unpack(binary_view)
+
+        nw_obj.major_ver, nw_obj.minor_ver, nw_obj.vol_flags = content[1], \
+            content[2], VolumeFlags(content[3])
+        _MOD_LOGGER.debug("VolumeInformation object created successfully")
+
+        return nw_obj
 
     def __repr__(self):
         'Return a nicely formatted representation string'
@@ -434,7 +549,7 @@ class FileName():
         self.parent_ref, self.parent_seq, self.timestamps["created"], \
         self.timestamps["changed"], self.timestamps["mft_change"], \
         self.timestamps["accessed"], \
-        self.flags, self.reparse_value, name_len, self.name_type, \
+        self.flags, self.reparse_value, _, self.name_type, \
         self.name = content
 
     def _get_name_len(self):
@@ -445,6 +560,17 @@ class FileName():
 
     @classmethod
     def create_from_binary(cls, binary_view):
+        '''Creates a new object FileName from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray.
+
+        Args:
+            binary_view (memoryview of bytearray) - A binary stream with the
+                information of an FileName
+
+        Returns:
+            FileName: New object using the binary stream as source
+        '''
         nw_obj = cls()
         content = cls._REPR.unpack(binary_view[:cls._REPR.size])
         name = binary_view[cls._REPR.size:].tobytes().decode("utf_16_le")
@@ -481,18 +607,11 @@ class FileName():
         as using <variable>.timestamps["accessed"]'''
         return self.timestamps["accessed"]
 
-    def __len__(self):
-        '''Returns the size of the file, in bytes, as recorded by the FILE_NAME
-        attribute. Be advised this can be wrong. The correct size should be parsed
-        from the data attribute. Blame Microsoft.'''
-        return self.file_size
-
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(parent_ref={}, parent_seq={}, timestamps={}, flags={!s}, name_len={}, name_type={!s}, name={})'.format(
-            self.parent_ref, self.parent_seq, self.timestamps,
-            self.flags, self.name_len, self.name_type,
-            self.name)
+        return self.__class__.__name__ + '(parent_ref={}, parent_seq={}, timestamps={}, reparse_value={}, flags={!s}, name_len={}, name_type={!s}, name={})'.format(
+            self.parent_ref, self.parent_seq, self.timestamps, self.reparse_value,
+            self.flags, self.name_len, self.name_type, self.name)
 
 #******************************************************************************
 # DATA ATTRIBUTE
@@ -523,6 +642,7 @@ class Data():
 class IndexNodeHeader():
     '''Represents the Index Node Header, that is always present in the INDEX_ROOT
     and INDEX_ALLOCATION attribute.'''
+
     _REPR = struct.Struct("<4I")
     ''' Offset to start of index entry - 4
         Offset to end of used portion of index entry - 4
@@ -530,15 +650,39 @@ class IndexNodeHeader():
         Flags - 4
     '''
 
-    def __init__(self, content):
+    def __init__(self, content=(None,)*4):
+        '''Creates a IndexNodeHeader object. The content has to be an iterable
+        with precisely 4 elements in order.
+        If content is not provided, a 4 element tuple, where all elements are
+        None, is the default argument
+
+        Args:
+            content (iterable), where:
+                [0] (int) - start offset
+                [1] (int) - end offset
+                [2] (int) - allocated size of the node
+                [3] (int) - non-leaf node Flag (has subnodes)
+        '''
         self.start_offset, self.end_offset, self.end_alloc_offset, \
         self.flags = content
 
     @classmethod
     def create_from_binary(cls, binary_view):
-        content = cls._REPR.unpack(binary_view[:cls._REPR.size])
+        '''Creates a new object IndexNodeHeader from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray.
 
-        return cls(content)
+        Args:
+            binary_view (memoryview of bytearray) - A binary stream with the
+                information of an IndexNodeHeader
+
+        Returns:
+            IndexNodeHeader: New object using the binary stream as source
+        '''
+        nw_obj = cls(cls._REPR.unpack(binary_view[:cls._REPR.size]))
+        _MOD_LOGGER.debug("IndexNodeHeader object created successfully")
+
+        return nw_obj
 
     def __repr__(self):
         'Return a nicely formatted representation string'
@@ -546,6 +690,8 @@ class IndexNodeHeader():
             self.start_offset, self.end_offset, self.end_alloc_offset, self.flags)
 
 class IndexEntry():
+    '''Represents an entry in the index.'''
+
     _REPR = struct.Struct("<Q2HI")
     ''' Undefined - 8
         Length of entry - 2
@@ -557,29 +703,63 @@ class IndexEntry():
     _REPR_VCN = struct.Struct("<Q")
 
     def __init__(self, content=(None,)*6):
+        '''Creates a StandardInformation object. The content has to be an iterable
+        with precisely 0 elements in order.
+        If content is not provided, a 0 element tuple, where all elements are
+        None, is the default argument
+
+        Args:
+            content (iterable), where:
+                [0] (int) - file reference?
+                [1] (int) - length of the entry
+                [2] (int) - length of the content
+                [3] (int) - flags (1 = index has a sub-node, 2 = last index entry in the node)
+                [4] (FileName or binary_string) - content
+                [5] (int) - vcn child node
+        '''
         #TODO don't save this here and overload later?
+        #TODO confirm if this is really generic or is always a file reference
+        #this generic variable changes depending what information is stored
+        #in the index
         self.generic, self.entry_len, self.content_len, self.flags, \
         self.content, self.vcn_child_node = content
 
-        if self.flags is not None:
-            self.flags = IndexEntryFlags(self.flags)
-
     @classmethod
     def create_from_binary(cls, binary_view, content_type=None):
+        '''Creates a new object IndexEntry from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray.
+
+        Args:
+            binary_view (memoryview of bytearray) - A binary stream with the
+                information of an IndexEntry
+            content_type (AttrTypes) - Type of content present in the index
+
+        Returns:
+            IndexEntry: New object using the binary stream as source
+        '''
         repr_size = cls._REPR.size
         content = cls._REPR.unpack(binary_view[:repr_size])
+        nw_obj = cls()
 
         vcn_child_node = (None,)
+        #if content is known (filename), create a new object to represent the content
         if content_type is AttrTypes.FILE_NAME and content[2]:
             binary_content = FileName.create_from_binary(binary_view[repr_size:repr_size+content[2]])
         else:
             binary_content = binary_view[repr_size:repr_size+content[2]].tobytes()
+        #if there is a next entry, we need to padd it to a 8 byte boundary
         if content[3] & IndexEntryFlags.CHILD_NODE_EXISTS:
             temp_size = repr_size + content[2]
             boundary_fix = (content[1] - temp_size) % 8
             vcn_child_node = cls._REPR_VCN.unpack(binary_view[temp_size+boundary_fix:temp_size+boundary_fix+8])
 
-        return cls(_chain(content, (binary_content,), vcn_child_node))
+        nw_obj.generic, nw_obj.entry_len, nw_obj.content_len, nw_obj.flags, \
+        nw_obj.content, nw_obj.vcn_child_node = content[0], content[1], content[2], \
+            IndexEntryFlags(content[3]), binary_content, vcn_child_node
+        _MOD_LOGGER.debug("IndexEntry object created successfully")
+
+        return nw_obj
 
     def __repr__(self):
         'Return a nicely formatted representation string'
@@ -589,6 +769,7 @@ class IndexEntry():
 
 class IndexRoot():
     '''Represents the INDEX_ROOT'''
+    #TODO update documentation of this class
     _REPR = struct.Struct("<3IB3x")
 
     def __init__(self, content=(None,)*4, node_header=None, idx_entry_list=None):
@@ -602,12 +783,24 @@ class IndexRoot():
 
     @classmethod
     def create_from_binary(cls, binary_view):
+        '''Creates a new object IndexRoot from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray.
+
+        Args:
+            binary_view (memoryview of bytearray) - A binary stream with the
+                information of an IndexRoot
+
+        Returns:
+            IndexRoot: New object using the binary stream as source
+        '''
         content = cls._REPR.unpack(binary_view[:cls._REPR.size])
         node_header = IndexNodeHeader.create_from_binary(binary_view[cls._REPR.size:])
         index_entry_list = []
         attr_type = AttrTypes(content[0]) if content[0] else None
 
         offset = cls._REPR.size + node_header.start_offset
+        #loads all index entries related to the root node
         while True:
             entry = IndexEntry.create_from_binary(binary_view[offset:], attr_type)
             index_entry_list.append(entry)
@@ -632,6 +825,7 @@ class IndexRoot():
 # BITMAP ATTRIBUTE
 #******************************************************************************
 class Bitmap():
+    '''Represents the bitmap attribute'''
     def __init__(self, bitmap_view):
         self._bitmap = bitmap_view.tobytes()
 

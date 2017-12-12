@@ -9,11 +9,14 @@ setup(
     license = "BSD 3-Clause",
     # See https://pypi.python.org/pypi?%3Aaction=list_classifiers
     classifiers=[
-         "Development Status :: 2 - Pre-Alpha",
+         "Development Status :: 3 - Alpha",
          "Intended Audience :: Developers",
+         "Intended Audience :: Information Technology",
          "License :: OSI Approved :: BSD License",
          "Operating System :: OS Independent",
          "Programming Language :: Python :: 3.6",
+         "Topic :: Security",
+         "Topic :: Software Development :: Libraries :: Python Modules"
     ],
     keywords = "mft parser python",
     python_requires = ">=3.6",
