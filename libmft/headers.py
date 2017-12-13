@@ -225,29 +225,54 @@ class NonResidentAttrHeader():
         Data runs - dynamic
     '''
 
-    def __init__(self, mft_config, header_view, non_resident_offset):
-        '''Creates a NonResidentAttrHeader object. header_view is a memoryview
-        starting at the beginning of the attribute and the non_resident_offset is
-        the size of the AttributeHeader, pointing to where the non resident
-        header starts'''
-        temp = self._REPR.unpack(header_view[non_resident_offset:non_resident_offset+NonResidentAttrHeader._REPR.size])
+    def __init__(self, content=(None,)*7, data_runs=None):
+        '''Creates a NonResidentAttrHeader object. The content has to be an iterable
+        with precisely 9 elements in order.
+        If content is not provided, a 9 element tuple, where all elements are
+        None, is the default argument
 
-        self.start_vcn = temp[0]
-        self.end_vcn = temp[1]
-        self.rl_offset = temp[2]
-        self.compress_usize = temp[3]
-        self.alloc_sstream = temp[4]
-        self.curr_sstream = temp[5]
-        self.init_sstream = temp[6]
-        if mft_config["attributes"]["load_dataruns"]:
-            self.data_runs = DataRuns.create_from_binary(header_view[self.rl_offset:])
-        else:
-            self.data_runs = None
+        Args:
+            content (iterable), where:
+                [0] (int) - start vcn
+                [1] (int) - end vcn
+                [2] (int) - datarun list offset
+                [3] (int) - compression unit size
+                [4] (int) - allocated data size
+                [5] (int) - current data size
+                [6] (int) - initialized data size
+            data_runs (list of DataRuns) - A list with all dataruns relative
+                to this particular header. If nothing is provided, the default
+                argument is 'None'.'''
+        self.start_vcn, self.end_vcn, self.rl_offset, self.compress_usize, \
+        self.alloc_sstream, self.curr_sstream, self.init_sstream = content
+        self.data_runs = data_runs
 
     @classmethod
-    def get_header_size(cls):
+    def get_static_content_size(cls):
         '''Return the header size, does not account for the number of data runs'''
         return cls._REPR.size
+
+    @classmethod
+    def create_from_binary(cls, load_dataruns, binary_view, non_resident_offset):
+        '''Creates a new object NonResidentAttrHeader from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray.
+
+        Args:
+            binary_view (memoryview of bytearray) - A binary stream with the
+                information of the attribute
+
+        Returns:
+            NonResidentAttrHeader: New object using hte binary stream as source
+        '''
+        content = cls._REPR.unpack(binary_view[non_resident_offset:non_resident_offset+cls._REPR.size])
+        nw_obj = cls(content)
+
+        if load_dataruns:
+            nw_obj.data_runs = DataRuns.create_from_binary(binary_view[nw_obj.rl_offset:])
+        _MOD_LOGGER.debug("NonResidentAttrHeader object created successfully")
+
+        return nw_obj
 
     def __len__(self):
         '''Returns the logical size of the mft entry'''
@@ -322,7 +347,7 @@ class AttributeHeader():
         if not non_resident:
             resident_header = ResidentAttrHeader._make(cls._REPR_RESIDENT.unpack(binary_view[cls._REPR.size:cls._REPR.size + cls._REPR_RESIDENT.size]))
         else:
-            non_resident_header = NonResidentAttrHeader(mft_config, binary_view, cls._REPR.size)
+            non_resident_header = NonResidentAttrHeader.create_from_binary(mft_config["attributes"]["load_dataruns"], binary_view, cls._REPR.size)
 
         if name_len:
             attr_name = binary_view[name_offset:name_offset+(2*name_len)].tobytes().decode("utf_16_le")
