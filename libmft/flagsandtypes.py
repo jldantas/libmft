@@ -56,6 +56,16 @@ class ReparseType(enum.Enum):
     WOF = 0x0017
     WCI = 0x0018
 
+class CollationRule(enum.Enum):
+    '''Possible collation rules for the IndexRoot attribute'''
+    COLLATION_BINARY = 0x00000000  #Binary. The first byte is most significant
+    COLLATION_FILENAME = 0x00000001  #Unicode strings, case-insensitive
+    COLLATION_UNICODE_STRING = 0x00000002  #Unicode strings, case-sensitive. Upper case letters should come first
+    COLLATION_NTOFS_ULONG = 0x00000010  #Unsigned 32-bit little-endian integer
+    COLLATION_NTOFS_SID = 0x00000011  #NT security identifier (SID)
+    COLLATION_NTOFS_SECURITY_HASH = 0x00000012  #Security hash first, then NT security identifier
+    COLLATION_NTOFS_ULONGS = 0x00000013  #An array of unsigned 32-bit little-endian integer values
+
 #******************************************************************************
 # Flags
 #******************************************************************************

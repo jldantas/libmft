@@ -18,7 +18,7 @@ setup(
          "Topic :: Security",
          "Topic :: Software Development :: Libraries :: Python Modules"
     ],
-    keywords = "mft parser python",
+    keywords = "mft parser library python",
     python_requires = ">=3.6",
     packages = ["libmft"],
 )

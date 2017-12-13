@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 This module contains all the known information about attributes. In particular,
 their content. By definition, as we have only the $MFT available for processing
@@ -14,7 +15,7 @@ from operator import getitem as _getitem
 
 from libmft.util.functions import convert_filetime, get_file_reference
 from libmft.flagsandtypes import AttrTypes, NameType, FileInfoFlags, \
-    IndexEntryFlags, VolumeFlags, ReparseType, ReparseFlags
+    IndexEntryFlags, VolumeFlags, ReparseType, ReparseFlags, CollationRule
 
 _MOD_LOGGER = logging.getLogger(__name__)
 
@@ -559,6 +560,16 @@ class FileName():
     name_len = property(_get_name_len, doc='Length of the name')
 
     @classmethod
+    def get_static_content_size(cls):
+        '''Returns the static size of the content never taking in consideration
+        variable fields, for example, names.
+
+        Returns:
+            int: The size of the content, in bytes
+        '''
+        return cls._REPR.size
+
+    @classmethod
     def create_from_binary(cls, binary_view):
         '''Creates a new object FileName from a binary stream. The binary
         stream can be represented by a byte string, bytearray or a memoryview of the
@@ -667,6 +678,16 @@ class IndexNodeHeader():
         self.flags = content
 
     @classmethod
+    def get_static_content_size(cls):
+        '''Returns the static size of the content never taking in consideration
+        variable fields, for example, names.
+
+        Returns:
+            int: The size of the content, in bytes
+        '''
+        return cls._REPR.size
+
+    @classmethod
     def create_from_binary(cls, binary_view):
         '''Creates a new object IndexNodeHeader from a binary stream. The binary
         stream can be represented by a byte string, bytearray or a memoryview of the
@@ -725,6 +746,16 @@ class IndexEntry():
         self.content, self.vcn_child_node = content
 
     @classmethod
+    def get_static_content_size(cls):
+        '''Returns the static size of the content never taking in consideration
+        variable fields, for example, names.
+
+        Returns:
+            int: The size of the content, in bytes
+        '''
+        return cls._REPR.size
+
+    @classmethod
     def create_from_binary(cls, binary_view, content_type=None):
         '''Creates a new object IndexEntry from a binary stream. The binary
         stream can be represented by a byte string, bytearray or a memoryview of the
@@ -769,17 +800,45 @@ class IndexEntry():
 
 class IndexRoot():
     '''Represents the INDEX_ROOT'''
-    #TODO update documentation of this class
+
     _REPR = struct.Struct("<3IB3x")
+    ''' Attribute type - 4
+        Collation rule - 4
+        Bytes per index record - 4
+        Clusters per index record - 1
+        Padding - 3
+    '''
 
     def __init__(self, content=(None,)*4, node_header=None, idx_entry_list=None):
+        '''Creates a IndexRoot object. The content has to be an iterable
+        with precisely 4 elements in order.
+        If content is not provided, a 4 element tuple, where all elements are
+        None, is the default argument
+
+        Args:
+            content (iterable), where:
+                [0] (AttrTypes) - attribute type
+                [1] (CollationRule) - collation rule
+                [2] (int) - index record size in bytes
+                [3] (int) - index record size in clusters
+            node_header (IndexNodeHeader) - the node header related to this index root
+            idx_entry_list (list of IndexEntry)- list of index entries that belong to
+                this index root
+        '''
         self.attr_type, self.collation_rule, self.index_len_in_bytes, \
         self.index_len_in_cluster = content
         self.node_header = node_header
         self.index_entry_list = idx_entry_list
 
-        if self.attr_type:
-            self.attr_type = AttrTypes(self.attr_type)
+    @classmethod
+    def get_static_content_size(cls):
+        '''Returns the static size of the content never taking in consideration
+        variable fields, for example, names.
+
+        Returns:
+            int: The size of the content, in bytes
+        '''
+        return cls._REPR.size
 
     @classmethod
     def create_from_binary(cls, binary_view):
@@ -795,11 +854,12 @@ class IndexRoot():
             IndexRoot: New object using the binary stream as source
         '''
         content = cls._REPR.unpack(binary_view[:cls._REPR.size])
-        node_header = IndexNodeHeader.create_from_binary(binary_view[cls._REPR.size:])
+        nw_obj = cls()
+        nw_obj.node_header = IndexNodeHeader.create_from_binary(binary_view[cls._REPR.size:])
         index_entry_list = []
         attr_type = AttrTypes(content[0]) if content[0] else None
 
-        offset = cls._REPR.size + node_header.start_offset
+        offset = cls._REPR.size + nw_obj.node_header.start_offset
         #loads all index entries related to the root node
         while True:
             entry = IndexEntry.create_from_binary(binary_view[offset:], attr_type)
@@ -809,11 +869,12 @@ class IndexRoot():
             else:
                 offset += entry.entry_len
 
-        return cls(content, node_header, index_entry_list)
+        nw_obj.index_entry_list = index_entry_list
+        nw_obj.attr_type, nw_obj.collation_rule, nw_obj.index_len_in_bytes, \
+        nw_obj.index_len_in_cluster = attr_type, CollationRule(content[1]), \
+            content[2], content[3]
 
-    @classmethod
-    def size(cls):
-        return cls._REPR.size
+        return nw_obj
 
     def __repr__(self):
         'Return a nicely formatted representation string'
@@ -852,8 +913,19 @@ class JunctionOrMount():
 
     @classmethod
     def create_from_binary(cls, binary_view):
+        '''Creates a new object JunctionOrMount from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray.
+
+        Args:
+            binary_view (memoryview of bytearray) - A binary stream with the
+                information of an JunctionOrMount
+
+        Returns:
+            JunctionOrMount: New object using the binary stream as source
+        '''
         content = cls._REPR.unpack(binary_view[:cls._REPR.size])
-        repar_point_size = ReparsePoint.get_struct_size()
+        repar_point_size = ReparsePoint.get_static_content_size()
 
         offset = repar_point_size + content[0]
         target_name = binary_view[offset:offset+content[1]].tobytes().decode("utf_16_le")
@@ -877,36 +949,63 @@ class ReparsePoint():
         Padding - 2
     '''
     def __init__(self, content=(None,)*5):
+        '''Creates a IndexRoot object. The content has to be an iterable
+        with precisely 5 elements in order.
+        If content is not provided, a 5 element tuple, where all elements are
+        None, is the default argument
+
+        Args:
+            content (iterable), where:
+                [0] (ReparseType) - Reparse point type
+                [1] (ReparseFlags) - Reparse point flags
+                [2] (int) - reparse data length
+                [3] (binary str) - guid (exists only in 3rd party reparse points)
+                [4] (variable) - content of the reparse type
+        '''
         self.reparse_type, self.reparse_flags, self.data_len, \
         self.guid, self.data = content
 
-        if self.reparse_type:
-            self.reparse_flags = ReparseFlags(self.reparse_flags)
-            self.reparse_type = ReparseType(self.reparse_type)
+    @classmethod
+    def get_static_content_size(cls):
+        '''Returns the static size of the content never taking in consideration
+        variable fields, for example, names.
+
+        Returns:
+            int: The size of the content, in bytes
+        '''
+        return cls._REPR.size
 
     @classmethod
     def create_from_binary(cls, binary_view):
+        '''Creates a new object JunctionOrMount from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray.
+
+        Args:
+            ReparsePoint (memoryview of bytearray) - A binary stream with the
+                information of an JunctionOrMount
+
+        Returns:
+            ReparsePoint: New object using the binary stream as source
+        '''
         content = cls._REPR.unpack(binary_view[:cls._REPR.size])
+        nw_obj = cls()
 
         #reparse_tag (type, flags) data_len, guid, data
-        #TODO rework this. A lot of duplicated effort (create tuple, expand tuple, casting, etc)
-        reparse_flag = (content[0] & 0xF0000000) >> 28
-        reparse_type = content[0] & 0x0000FFFF
+        nw_obj.reparse_flag = ReparseFlags((content[0] & 0xF0000000) >> 28)
+        nw_obj.reparse_type = ReparseType(content[0] & 0x0000FFFF)
         guid = None #guid exists only in third party reparse points
-        if reparse_flag & ReparseFlags.IS_MICROSOFT:#a microsoft tag
-            if ReparseType(reparse_type) is ReparseType.MOUNT_POINT or reparse_type is ReparseType.SYMLINK:
+        if nw_obj.reparse_flag & ReparseFlags.IS_MICROSOFT:#a microsoft tag
+            if nw_obj.reparse_type is ReparseType.MOUNT_POINT or nw_obj.reparse_type is ReparseType.SYMLINK:
                 data = JunctionOrMount.create_from_binary(binary_view[cls._REPR.size:])
             else:
                 data = binary_view[cls._REPR.size:].tobytes()
         else:
             guid = binary_view[cls._REPR.size:cls._REPR.size+16].tobytes()
             data = binary_view[cls._REPR.size+len(guid):].tobytes()
+        nw_obj.data_len, nw_obj.guid, nw_obj.data = content[1], guid, data
 
-        return cls((reparse_type, reparse_flag, content[1], guid, data))
-
-    @classmethod
-    def get_struct_size(cls):
-        return cls._REPR.size
+        return nw_obj
 
     def __repr__(self):
         'Return a nicely formatted representation string'
