@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 ''' This module holds all flags and types as defined by the library.
 This way, we have consistent means of finding this information. (Hopefully)
 '''

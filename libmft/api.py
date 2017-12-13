@@ -45,18 +45,14 @@ multiple logical entries (hard links and data streams) which means that one entr
 needs to be correctly processed to show all the data
 '''
 import struct
-import enum
-import collections
 import logging
 
-from itertools import chain as _chain
 from collections import defaultdict as _defaultdict
 from functools import lru_cache
 from operator import itemgetter as _itemgetter
 
 from libmft.util.functions import convert_filetime, apply_fixup_array, flatten, \
-    get_file_size as _get_file_size, is_related as _is_related, get_file_reference, \
-    exits_bisect
+    get_file_size as _get_file_size, get_file_reference
 from libmft.flagsandtypes import MftSignature, AttrTypes, MftUsageFlags
 from libmft.attrcontent import StandardInformation, FileName, IndexRoot, Data, \
     AttributeList, Bitmap, ObjectID, VolumeName, VolumeInformation, ReparsePoint, \
@@ -454,14 +450,7 @@ class MFTEntry():
         return self.__class__.__name__ + '(header={}, attrs={}, data_stream={})'.format(
             self.header, self.attrs, self.data_streams)
 
-def is_related2(parent_entry, child_entry):
-    '''This function checks if a child entry is related to the parent entry.
-    This is done by comparing the reference and sequence numbers.'''
-    if parent_entry.mft_record == child_entry.base_record_ref and \
-       parent_entry.seq_number == child_entry.base_record_seq:
-        return True
-    else:
-        return False
+
 
 class _MFTEntryStub():
     #TODO create a way of dealing with XP only artefacts
@@ -504,6 +493,23 @@ class _MFTEntryStub():
             int: The size of the content, in bytes
         '''
         return cls._REPR.size
+
+    #TODO change this to receive the numbers instead of entry, so the api is "normalized"?
+    def is_related(self, child_entry):
+        '''Compares if two entries are related, based on the reference and sequence
+        numbers.
+
+        Args:
+            child_entry (_MFTEntryStub) - Entry to compare if the it is child or not
+
+        Returns:
+            (bool): True if the entries are related, False otherwise'''
+        if self.mft_record == child_entry.base_record_ref and \
+           self.seq_number == child_entry.base_record_seq:
+            return True
+        else:
+            return False
+
 
     def __repr__(self):
         'Return a nicely formatted representation string'
@@ -590,7 +596,7 @@ class MFT():
         for i, stub in enumerate(temp):
             if stub is not None:
                 self._number_valid_entries += 1
-                if stub.base_record_ref and is_related2(temp[stub.base_record_ref], stub): #stub.base_record_ref is not 0
+                if stub.base_record_ref and temp[stub.base_record_ref].is_related(stub): #stub.base_record_ref is not 0
                     self._entries_parent_child[stub.base_record_ref].append(stub.mft_record)
                     self._entries_child_parent[stub.mft_record] = stub.base_record_ref
             else:
