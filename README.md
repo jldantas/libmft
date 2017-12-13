@@ -61,6 +61,7 @@ P.S.: The implementation I used can be seen in the file parallel.py
 ## TODO/Roadmap?
 
 - Find a way of optimizing the datetime conversion (numpy datetime?)
+- Test with windows XP formatted disks (NTFS version < 3)
 
 ## Features
 

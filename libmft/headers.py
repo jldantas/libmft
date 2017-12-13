@@ -1,17 +1,24 @@
+# -*- coding: utf-8 -*-
 '''
 This module contains the definitions for all the headers when interpreting the
 MFT.
+
+These include, the MFT header, the  "basic" attribute header, the resident
+attribute header and the non resident attribute header.
+
+This module can trigger the HeaderError exception in case something goes wrong.
 '''
 import enum
 import struct
 import collections
 import logging
+from operator import getitem as _getitem
 
 from libmft.flagsandtypes import AttrTypes, MftSignature, AttrFlags, MftUsageFlags
 from libmft.util.functions import get_file_reference
-from libmft.exceptions import HeaderError#, AttrHeaderException
+from libmft.exceptions import HeaderError
 
-MOD_LOGGER = logging.getLogger(__name__)
+_MOD_LOGGER = logging.getLogger(__name__)
 
 #TODO evaluate if converting a bunch of stuff to ctypes is a good idea
 
@@ -93,11 +100,11 @@ class MFTHeader():
             else:
                 raise HeaderError("Entry has no valid signature.", "MFTHeader")
         if header[1] < MFTHeader.get_static_content_size(): #header[1] is fx_offset
-            raise HeaderError("Fix up array begins within the header.", header[12])
+            raise HeaderError("Fix up array begins within the header.", "MFTHeader")
         if header[6] < cls._REPR.size: #first attribute offset < header size
-            raise HeaderError("First attribute offset points to inside of the header.")
+            raise HeaderError("First attribute offset points to inside of the header.", "MFTHeader")
         if header[8] > header[9]: #entry_len > entry_alloc_len
-            raise HeaderError("Logical size of the MFT is bigger than MFT allocated size.", header[12])
+            raise HeaderError("Logical size of the MFT is bigger than MFT allocated size.", "MFTHeader")
 
         file_ref, file_seq = get_file_reference(header[10])
 
@@ -137,37 +144,55 @@ ResidentAttrHeader = collections.namedtuple("ResidentAttrHeader",
 class DataRuns():
     _INFO = struct.Struct("<B")
 
-    def __init__(self, runs_view):
-        '''Parses and stores the data runs of a non-resident attribute. This can,
-        for all intents an purpose, the "content" of an attribute in the view of
-        MFT, even if the tru content is somewhere else on the disk.
-        The data run structure is stored in a list of tuples, where the first value
-        is the length of the data run and the second value is the absolute offset.
+    def __init__(self, data_runs=[]):
+        '''Creates a new DataRuns object.
 
         Great resource for explanation and tests:
         https://flatcap.org/linux-ntfs/ntfs/concepts/data_runs.html
-        '''
-        self.data_runs = [] #lis of tuples
-        #TODO create a class for this?
 
+        Args:
+            binary_view (list of tuples) - A list of tuples representing the data run.
+                The tuple has to have 2 elements, where the first element is the
+                length of the data run and the second is the absolute offset
+        '''
+        self.data_runs = data_runs #list of tuples
+
+    @classmethod
+    def create_from_binary(cls, binary_view):
+        '''Creates a new object DataRuns from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray.
+
+        Args:
+            binary_view (memoryview of bytearray) - A binary stream with the
+                information of the attribute
+
+        Returns:
+            DataRuns: New object using hte binary stream as source
+        '''
+        nw_obj = cls()
         offset = 0
         previous_dr_offset = 0
-        header_size = DataRuns._INFO.size #"header" of a data run is always a byte
+        header_size = cls._INFO.size #"header" of a data run is always a byte
 
-        while runs_view[offset] != 0:   #the runlist ends with an 0 as the "header"
-            header = DataRuns._INFO.unpack(runs_view[offset:offset+header_size])[0]
+        while binary_view[offset] != 0:   #the runlist ends with an 0 as the "header"
+            header = cls._INFO.unpack(binary_view[offset:offset+header_size])[0]
             length_len = header & 0x0F
             length_offset = (header & 0xF0) >> 4
 
             temp_len = offset+header_size+length_len #helper variable just to make things simpler
-            dr_length = int.from_bytes(runs_view[offset+header_size:temp_len], "little", signed=False)
+            dr_length = int.from_bytes(binary_view[offset+header_size:temp_len], "little", signed=False)
             if length_offset: #the offset is relative to the previous data run
-                dr_offset = int.from_bytes(runs_view[temp_len:temp_len+length_offset], "little", signed=True) + previous_dr_offset
+                dr_offset = int.from_bytes(binary_view[temp_len:temp_len+length_offset], "little", signed=True) + previous_dr_offset
                 previous_dr_offset = dr_offset
             else: #if it is sparse, requires a a different approach
                 dr_offset = None
             offset += header_size + length_len + length_offset
-            self.data_runs.append((dr_length, dr_offset))
+            nw_obj.data_runs.append((dr_length, dr_offset))
+
+        _MOD_LOGGER.debug("DataRuns object created successfully")
+
+        return nw_obj
 
     def __len__(self):
         '''Returns the number of data runs'''
@@ -179,7 +204,7 @@ class DataRuns():
 
     def __getitem__(self, index):
         '''Return a specific data run'''
-        return self.data_runs[index]
+        return _getitem(self.data_runs, index)
 
     def __repr__(self):
         'Return a nicely formatted representation string'
@@ -215,7 +240,7 @@ class NonResidentAttrHeader():
         self.curr_sstream = temp[5]
         self.init_sstream = temp[6]
         if mft_config["attributes"]["load_dataruns"]:
-            self.data_runs = DataRuns(header_view[self.rl_offset:])
+            self.data_runs = DataRuns.create_from_binary(header_view[self.rl_offset:])
         else:
             self.data_runs = None
 

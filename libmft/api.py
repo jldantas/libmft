@@ -1,5 +1,5 @@
+# -*- coding: utf-8 -*-
 '''
-#TODO
 -Definition of the API
 This module is reponsible for the main parts that are exposed to the calling application.
 
@@ -285,12 +285,7 @@ class MFTEntry():
             MOD_LOGGER.error(f"Expected MFT size is different than entry size.")
             raise EntryError(f"Expected MFT size ({len(binary_data)}) is different than entry size ({header.entry_alloc_len}).", binary_data, entry_number)
         if mft_config["apply_fixup_array"]:
-            try:
-                apply_fixup_array(bin_view, header.fx_offset, header.fx_count, header.entry_alloc_len)
-            except FixUpError as e:
-                e.update_entry_binary(binary_data)
-                e.update_entry_number(entry_number)
-                raise
+            apply_fixup_array(bin_view, header.fx_offset, header.fx_count, header.entry_alloc_len)
 
         if mft_config["attributes"]["enable"] or mft_config["datastreams"]["enable"]:
             entry._load_attributes(mft_config, bin_view[header.first_attr_offset:])

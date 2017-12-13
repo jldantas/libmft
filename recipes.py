@@ -191,8 +191,8 @@ def test_my_mft():
 
     with open(test, "rb") as mft_file:
         mft = libmft.api.MFT(mft_file)
-        #print(mft[274357])
-        test_1(mft)
+        print(mft[75429])
+        #test_1(mft)
         # for entry in mft:
         #     #print(entry)
         #     b = entry.get_unique_filename_attrs()

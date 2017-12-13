@@ -1,12 +1,17 @@
-
+# -*- coding: utf-8 -*-
 '''
+This module contains all the exceptions that can be raised by the library.
+
+It is important to note that some other core language exceptions can still
+be raised.
+
 Exceptions hierachy
 - MFTException
-- EntryError
-
--- HeaderError
--- FixUpError
-
+|-- MFTError
+|-- FixUpError
+|-- EntryError
+||--- HeaderError
+||--- DataStreamError
 '''
 
 #TODO configure this based on the level of logging
@@ -24,6 +29,14 @@ def set_message_level(level):
 class MFTException(Exception):
     '''Base exception for all the exceptions defined by the library.'''
     pass
+
+class MFTError(MFTException):
+    pass
+
+class FixUpError(MFTException):
+    def __init__(self, msg):
+        super().__init__(msg)
+        pass
 
 class EntryError(MFTException):
     '''Base exception for all the exceptions defined by the library.'''
@@ -50,13 +63,9 @@ class EntryError(MFTException):
 
         return "".join((super().__str__(), msg))
 
-class MFTError(MFTException):
-    pass
-
-class FixUpError(MFTException):
-    def __init__(self, msg):
-        super().__init__(msg, None, None)
-        pass
+class DataStreamError(EntryError):
+    def __init__(self, msg, entry_number=-1):
+        super().__init__(msg, None, entry_number)
 
 class HeaderError(EntryError):
     def __init__(self, msg, header_name):
@@ -68,7 +77,3 @@ class HeaderError(EntryError):
         msg = f"\nHeader type: {self._header_name}"
 
         return "".join((basic_info, msg))
-
-class DataStreamError(MFTException):
-    def __init__(self, msg, entry_number=-1):
-        super().__init__(msg, None, entry_number)

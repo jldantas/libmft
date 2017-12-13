@@ -62,7 +62,7 @@ def apply_fixup_array(bin_view, fx_offset, fx_count, entry_size):
             bin_view[position:position+2] = fx_array[index * 2:(index * 2) + 2]
         else:
             MOD_LOGGER.error("Error applying the fixup array")
-            raise FixUpError(f"Applying fixup item {fx_array[:2].tobytes()} in the wrong offset {position}.")
+            raise FixUpError(f"Signature {fx_array[:2].tobytes()} does not match {bin_view[position:position+2].tobytes()} at offset {position}.")
         index += 1
         position = (sector_size * index) - 2
     MOD_LOGGER.info("Fix up array applied successfully.")
