@@ -29,8 +29,7 @@ All these particular observations and cases are documented here.
 
 #### Entries
 
-Entries will not be loaded if they are empty (signature equals to "\x00\x00\x00\x00")
-or if the is marked as "not in use" and have no attributes.
+Entries will not be loaded if they are empty (signature equals to "\x00\x00\x00\x00").
 
 #### Attributes
 
@@ -43,7 +42,7 @@ or if the is marked as "not in use" and have no attributes.
 
 I've tried to implement the loading of the file using multiple processes
 (multiprocessing, because of the GIL), however, using it the amount of memory
-doubled as well as  the processing time.
+doubled as well as the processing time.
 
 Most likely, the processing time was increased because of the pickling of the data.
 The consumption of memory, is not very clear, but probably due to some copying
@@ -95,18 +94,19 @@ P.S.: The implementation I used can be seen in the file parallel.py
 
 ### Version 0.5
 
-- Entries not in use and having no attributes are no longer loaded
 - Removed the STANDARD_INFORMATION versions and "class ID" fields
 - Removed the FILE_NAME "allocated size" and "real size"
 - Implemented Datastreams
 - Implemented CollationRules
 - Updated code for most of the attribute contents
 - Updated documentation
+- Implemented library configuration in its own class
+- Updated code for attribute parsing
 
 ## Known problems
 
-- If you try to set the date for a year > 9999, python will fire a Overflow exception. This is python bound unless we change
-the datetime module to a third party
+- If you try to set the date for a year > 9999, python will fire a Overflow exception.
+This is python bound unless we change the datetime module to a third party
 
 ## References:
 

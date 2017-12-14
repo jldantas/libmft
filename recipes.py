@@ -1,9 +1,14 @@
-import copy
 import itertools
+import logging
 
 #import libmft.api
 import libmft.api
 from libmft.flagsandtypes import AttrTypes, FileInfoFlags, MftUsageFlags
+
+_MOD_LOGGER = logging.getLogger("libmft")
+sh = logging.StreamHandler()
+_MOD_LOGGER.addHandler(sh)
+_MOD_LOGGER.setLevel(logging.DEBUG)
 
 #test = "./mft_samples/MFT_singlefile.bin"
 #test = "./mft_samples/MFT_singlefileads.bin"

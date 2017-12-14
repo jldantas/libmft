@@ -374,10 +374,11 @@ class AttributeHeader():
         '''Return the resident attribute header size.'''
         return cls._REPR_RESIDENT.size
 
-    @staticmethod
-    def get_basic_attr_header_info(bin_view):
-        return AttrTypes(int.from_bytes(bin_view[:4], "little", signed=False)), \
-            int.from_bytes(bin_view[4:8], "little", signed=False)
+    _BASIC = struct.Struct("<2I")
+    @classmethod
+    def get_basic_attr_header_info(cls, bin_view):
+        t = cls._BASIC.unpack(bin_view[:8])
+        return AttrTypes(t[0]), t[1]
 
     def is_non_resident(self):
         if self.resident_header:

@@ -61,7 +61,7 @@ from libmft.headers import MFTHeader, ResidentAttrHeader, NonResidentAttrHeader,
     AttributeHeader, DataRuns
 from libmft.exceptions import FixUpError, DataStreamError, EntryError, MFTError, HeaderError
 
-MOD_LOGGER = logging.getLogger(__name__)
+_MOD_LOGGER = logging.getLogger(__name__)
 
 class Datastream():
     '''Represents one datastream for a entry. This datastream has all the necessary
@@ -103,7 +103,6 @@ class Datastream():
             if not nonr_header.start_vcn: #start_vcn == 0
                 self.size = nonr_header.curr_sstream
                 self.alloc_size = nonr_header.alloc_sstream
-            #TODO I think we need only the start_vcn and not the end_vcn. verify.
             self._data_runs.append((nonr_header.start_vcn, nonr_header.data_runs))
             self._data_runs_sorted = False
         else: #if it is resident
@@ -207,48 +206,6 @@ class Attribute():
 
         return cls(header, content)
 
-
-    # @classmethod
-    # def create_from_binary(cls, mft_config, binary_view):
-    #     header = AttributeHeader.create_from_binary(mft_config, binary_view)
-    #     content = None
-    #
-    #     if not header.is_non_resident():
-    #         offset = header.resident_header.content_offset
-    #         length = header.resident_header.content_len
-    #         attr_config = mft_config["attributes"]
-    #
-    #         if attr_config["file_name"] and header.attr_type_id is AttrTypes.FILE_NAME:
-    #             content = FileName.create_from_binary(binary_view[offset:offset+length])
-    #         elif attr_config["std_info"] and header.attr_type_id is AttrTypes.STANDARD_INFORMATION:
-    #             content = StandardInformation.create_from_binary(binary_view[offset:offset+length])
-    #         elif attr_config["idx_root"] and header.attr_type_id is AttrTypes.INDEX_ROOT:
-    #             content = IndexRoot.create_from_binary(binary_view[offset:offset+length])
-    #         elif attr_config["attr_list"] and header.attr_type_id is AttrTypes.ATTRIBUTE_LIST:
-    #             content = AttributeList.create_from_binary(binary_view[offset:offset+length])
-    #         elif mft_config["datastreams"]["load_content"] and header.attr_type_id is AttrTypes.DATA:
-    #             content = Data(binary_view[offset:offset+length])
-    #         elif attr_config["object_id"] and header.attr_type_id is AttrTypes.OBJECT_ID:
-    #             content = ObjectID.create_from_binary(binary_view[offset:offset+length])
-    #         elif attr_config["bitmap"] and header.attr_type_id is AttrTypes.BITMAP:
-    #             content = Bitmap(binary_view[offset:offset+length])
-    #         elif attr_config["ea_info"] and header.attr_type_id is AttrTypes.EA_INFORMATION:
-    #             content = EaInformation(binary_view[offset:offset+length])
-    #         elif attr_config["log_tool_str"] and header.attr_type_id is AttrTypes.LOGGED_TOOL_STREAM:
-    #             content = LoggedToolStream(binary_view[offset:offset+length])
-    #         elif attr_config["reparse"] and header.attr_type_id is AttrTypes.REPARSE_POINT:
-    #             content = ReparsePoint.create_from_binary(binary_view[offset:offset+length])
-    #         elif attr_config["vol_name"] and header.attr_type_id is AttrTypes.VOLUME_NAME:
-    #             content = VolumeName.create_from_binary(binary_view[offset:offset+length])
-    #         elif attr_config["vol_info"] and header.attr_type_id is AttrTypes.VOLUME_INFORMATION:
-    #             content = VolumeInformation.create_from_binary(binary_view[offset:offset+length])
-    #         else:
-    #             #print(self.header.attr_type_id)
-    #             #TODO log/error when we don't know how to treat an attribute
-    #             pass
-    #
-    #     return cls(header, content)
-
     def is_non_resident(self):
         '''Helper function to check if an attribute is resident or not. Returns
         True if it is resident, otherwise returns False'''
@@ -312,11 +269,10 @@ class MFTEntry():
         entry = cls(header, {})
 
         if header.mft_record != entry_number:
-            MOD_LOGGER.warning(f"The MFT entry number doesn't match. {entry_number} != {header.mft_record}")
+            _MOD_LOGGER.warning(f"The MFT entry number doesn't match. {entry_number} != {header.mft_record}")
         if len(binary_data) != header.entry_alloc_len:
-            MOD_LOGGER.error(f"Expected MFT size is different than entry size.")
+            _MOD_LOGGER.error(f"Expected MFT size is different than entry size.")
             raise EntryError(f"Expected MFT size ({len(binary_data)}) is different than entry size ({header.entry_alloc_len}).", binary_data, entry_number)
-        #if mft_config["apply_fixup_array"]:
         if mft_config.apply_fixup_array:
             apply_fixup_array(bin_view, header.fx_offset, header.fx_count, header.entry_alloc_len)
 
@@ -367,9 +323,7 @@ class MFTEntry():
                 if not attr.header.attr_type_id is AttrTypes.DATA:
                     self._add_attribute(attr)
                 else:
-                    #print(attr)
                     self._add_datastream(attr)
-            #offset += len(attr)
             offset += attr_len
 
 
@@ -377,26 +331,6 @@ class MFTEntry():
             #     e.update_entry_number(entry_number)
             #     e.update_entry_binary(binary_data)
 
-    # def _load_attributes(self, mft_config, attrs_view):
-    #     '''This function receives a view that starts at the first attribute
-    #     until the end of the entry
-    #     '''
-    #     offset = 0
-    #
-    #     while (attrs_view[offset:offset+4] != b'\xff\xff\xff\xff'):
-    #         #pass all the information to the attr, as we don't know how
-    #         #much content the attribute has
-    #         #try:
-    #         attr = Attribute.create_from_binary(mft_config, attrs_view[offset:])
-    #         if not attr.header.attr_type_id is AttrTypes.DATA:
-    #             self._add_attribute(attr)
-    #         else:
-    #             #print(attr)
-    #             self._add_datastream(attr)
-    #         offset += len(attr)
-    #         # except EntryError as e:
-    #         #     e.update_entry_number(entry_number)
-    #         #     e.update_entry_binary(binary_data)
 
     def merge_entries(self, source_entry):
         '''Merge one entry attributes and datastreams with the current entry.
@@ -535,7 +469,7 @@ class _MFTEntryStub():
             nw_obj.mft_record, nw_obj.seq_number, nw_obj.base_record_ref, \
             nw_obj.base_record_seq = record_n, seq_number, file_ref, file_seq
         else:
-            MOD_LOGGER.debug(f"Entry {record_n} is empty.")
+            _MOD_LOGGER.debug(f"Entry {record_n} is empty.")
 
         return nw_obj
 
@@ -614,32 +548,6 @@ class MFT():
     '''This class represents a MFT file. It has a bunch of MFT entries
     that have been parsed
     '''
-    # mft_config = {"entry_size" : 0, #0 for autodetect
-    #               "apply_fixup_array" : True,
-    #               "ignore_signature_check": False, #does not check if the signature (FILE or BAD) is valid
-    #               "attributes" : {},
-    #               "datastreams": {}
-    #              }
-    # mft_config["attributes"] = {"enable" : True,
-    #                             "load_dataruns" : True, #dataruns are part of the attribute header
-    #                             "std_info" : True,
-    #                             "attr_list" : True,
-    #                             "file_name" : True,
-    #                             "object_id" : True,
-    #                             "sec_desc" : True,
-    #                             "vol_name" : True,
-    #                             "vol_info" : True,
-    #                             "idx_root" : True,
-    #                             "idx_alloc" : True,
-    #                             "bitmap" : True,
-    #                             "reparse" : True,
-    #                             "ea_info" : True,
-    #                             "ea" : True,
-    #                             "log_tool_str" : True
-    #                            }
-    # mft_config["datastreams"] = {"enable" : True,
-    #                              "load_content" : True
-    #                             }
 
     def __init__(self, file_pointer, mft_config=MFTConfig()):
         #TODO redo documentation
@@ -650,7 +558,6 @@ class MFT():
         it.
         '''
         self.file_pointer = file_pointer
-        #self.mft_config = mft_config if mft_config is not None else MFT.mft_config
         self.mft_config = mft_config
         self.mft_entry_size = self.mft_config.entry_size
         self._entries_parent_child = _defaultdict(list) #holds the relation ship between parent and child
@@ -659,7 +566,7 @@ class MFT():
         self._number_valid_entries = 0
 
         if not self.mft_entry_size: #if entry size is zero, try to autodetect
-            MOD_LOGGER.info("Trying to detect MFT size entry")
+            _MOD_LOGGER.info("Trying to detect MFT size entry")
             self.mft_entry_size = MFT._find_mft_size(file_pointer)
 
         self._load_stub_info()
@@ -678,7 +585,7 @@ class MFT():
         temp = []
 
         #loads minimum amount of data from the file for now
-        MOD_LOGGER.info("Loading basic info from file...")
+        _MOD_LOGGER.info("Loading basic info from file...")
         for i in range(0, _get_file_size(self.file_pointer), mft_entry_size):
             mft_record_n = int(i/mft_entry_size)    #calculate which is the entry number
             self.file_pointer.seek(i)
@@ -686,7 +593,7 @@ class MFT():
             stub = _MFTEntryStub.load_from_file_pointer(data_buffer, mft_record_n)
             temp.append(stub)
         #from the information loaded, find which entries are related and the one that are empty
-        MOD_LOGGER.info("Mapping related entries...")
+        _MOD_LOGGER.info("Mapping related entries...")
         for i, stub in enumerate(temp):
             if stub is not None:
                 self._number_valid_entries += 1
@@ -711,14 +618,12 @@ class MFT():
             self.file_pointer.seek(self.mft_entry_size * number)
             self.file_pointer.readinto(binary)
             temp_entry = MFTEntry.create_from_binary(self.mft_config, binary, number)
-            #print(temp_entry)
             entry.merge_entries(temp_entry)
 
         return entry
 
     def __iter__(self):
         returned = 0
-        #mft_entry_size, number_valid_entries _empty_entries = self._empty_entries
 
         for i in range(0, _get_file_size(self.file_pointer), self.mft_entry_size):
             mft_record_n = int(i/self.mft_entry_size)
@@ -742,15 +647,6 @@ class MFT():
             raise ValueError(f"Entry {index} is a child entry.")
 
         return self._read_full_entry(index)
-        # search_for = index
-        # if search_for in self._empty_entries:
-        #     raise ValueError(f"Entry {index} is empty.")
-        # if search_for in self._entries_child_parent:
-        #     raise ValueError(f"Entry {index} is a child entry.")
-        #     #search_for = self._entries_child_parent[search_for]
-        #
-        # return self._read_full_entry(search_for)
-
 
     def __len__(self):
         return self._number_valid_entries
@@ -768,7 +664,7 @@ class MFT():
             file_object.seek(size, 0)
             second_sig = file_object.read(4)
             if second_sig in sigs:
-                MOD_LOGGER.info(f"MFT entry size found = {size}")
+                _MOD_LOGGER.info(f"MFT entry size found = {size}")
                 break
         file_object.seek(0)
 
