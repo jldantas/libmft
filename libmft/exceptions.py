@@ -64,8 +64,8 @@ class EntryError(MFTException):
         return "".join((super().__str__(), msg))
 
 class DataStreamError(EntryError):
-    def __init__(self, msg, entry_number=-1):
-        super().__init__(msg, None, entry_number)
+    def __init__(self, msg):
+        super().__init__(msg, None, -1)
 
 class HeaderError(EntryError):
     def __init__(self, msg, header_name):

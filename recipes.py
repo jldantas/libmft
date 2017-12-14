@@ -167,20 +167,18 @@ def stress_ads(mft_config):
 def test_my_mft():
     #test = "../my_mft.bin"
     test = "c:/cases/my_mft.bin"
-    mft_config = copy.deepcopy(libmft.api.MFT.mft_config)
-    mft_config["attributes"]["load_dataruns"] = False
-    mft_config["attributes"]["object_id"] = False
-    mft_config["attributes"]["sec_desc"] = False
-    mft_config["attributes"]["idx_root"] = False
-    mft_config["attributes"]["idx_alloc"] = False
-    mft_config["attributes"]["bitmap"] = False
-    mft_config["attributes"]["reparse"] = False
-    mft_config["attributes"]["ea_info"] = False
-    mft_config["attributes"]["ea"] = False
-    mft_config["attributes"]["log_tool_str"] = False
-    mft_config["attributes"]["attr_list"] = False
-    # mft_config["datastreams"] = {"enable" : True,
-    #                              "load_content" : True
+    mft_config = libmft.api.MFTConfig()
+    mft_config.load_dataruns = False
+    mft_config.load_object_id = False
+    mft_config.load_sec_desc = False
+    mft_config.load_idx_root = False
+    mft_config.load_idx_alloc = False
+    mft_config.load_bitmap = False
+    mft_config.load_reparse = False
+    mft_config.load_ea_info = False
+    mft_config.load_ea = False
+    mft_config.load_log_tool_str = False
+    mft_config.load_attr_list = False
 
     '''Entries to play:
         my_mft/75429 - datastream (multiple data attributes accross many entries)
@@ -190,15 +188,12 @@ def test_my_mft():
 
 
     with open(test, "rb") as mft_file:
-        mft = libmft.api.MFT(mft_file)
+        #mft = libmft.api.MFT(mft_file)
+        mft = libmft.api.MFT(mft_file, mft_config)
         #print(mft[75429])
-        test_1(mft)
-        # for entry in mft:
-        #     #print(entry)
-        #     b = entry.get_unique_filename_attrs()
-        #     if b is not None:
-        #         for a in b:
-        #             get_full_path(mft, a)
+        #test_1(mft)
+        for entry in mft:
+            pass
 
 def test_botched_header():
     test = "../data.bin"

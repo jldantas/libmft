@@ -1033,8 +1033,27 @@ class EaInformation():
 #******************************************************************************
 # EA ATTRIBUTE
 #******************************************************************************
+#TODO implement EA attribute
 class Ea():
-    pass
+    def __init__(self, bin_view):
+        pass
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return self.__class__.__name__ + "()"
+
+#******************************************************************************
+# SECURITY_DESCRIPTOR ATTRIBUTE
+#******************************************************************************
+#TODO implement SECURITY_DESCRIPTOR attribute
+class SecurityDescriptor():
+    def __init__(self, bin_view):
+        pass
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return self.__class__.__name__ + "()"
+
 
 #******************************************************************************
 # LOGGED_TOOL_STREAM ATTRIBUTE

@@ -56,7 +56,7 @@ from libmft.util.functions import convert_filetime, apply_fixup_array, flatten, 
 from libmft.flagsandtypes import MftSignature, AttrTypes, MftUsageFlags
 from libmft.attrcontent import StandardInformation, FileName, IndexRoot, Data, \
     AttributeList, Bitmap, ObjectID, VolumeName, VolumeInformation, ReparsePoint, \
-    EaInformation, LoggedToolStream
+    EaInformation, LoggedToolStream, SecurityDescriptor, Ea
 from libmft.headers import MFTHeader, ResidentAttrHeader, NonResidentAttrHeader,  \
     AttributeHeader, DataRuns
 from libmft.exceptions import FixUpError, DataStreamError, EntryError, MFTError, HeaderError
@@ -75,13 +75,14 @@ class Datastream():
         '''Initialize on datastream. The only parameter accepted is the
         name of the datastream.'''
         #we don't need to save the compression usize because we are unable to access the rest of the disk
+        #TODO confirm this (^) affirmation
         self.name = name
         self.size = 0 #logical size
         self.alloc_size = 0 #allocated size
         self.cluster_count = 0
         self._data_runs = None #data runs only exist if the attribute is non resident
         #the _data_runs variable stores a tuple with the format:
-        #(start_vcn, end_vcn, dataruns). We use the start_vcn to sort the dataruns in
+        #(start_vcn, dataruns). We use the start_vcn to sort the dataruns in
         #the correct order
         self._content = None
         self._data_runs_sorted = False
@@ -103,7 +104,7 @@ class Datastream():
                 self.size = nonr_header.curr_sstream
                 self.alloc_size = nonr_header.alloc_sstream
             #TODO I think we need only the start_vcn and not the end_vcn. verify.
-            self._data_runs.append((nonr_header.start_vcn, nonr_header.end_vcn, nonr_header.data_runs))
+            self._data_runs.append((nonr_header.start_vcn, nonr_header.data_runs))
             self._data_runs_sorted = False
         else: #if it is resident
             self.size = self.alloc_size = data_attr.header.resident_header.content_len
@@ -163,6 +164,24 @@ class Datastream():
 class Attribute():
     '''Represents an attribute, header and content. Independently the type of
     attribute'''
+    _dispatcher = {AttrTypes.STANDARD_INFORMATION : StandardInformation.create_from_binary,
+                   AttrTypes.ATTRIBUTE_LIST : AttributeList.create_from_binary,
+                   AttrTypes.FILE_NAME : FileName.create_from_binary,
+                   AttrTypes.OBJECT_ID : ObjectID.create_from_binary,
+                   AttrTypes.SECURITY_DESCRIPTOR : SecurityDescriptor,
+                   AttrTypes.VOLUME_NAME : VolumeName.create_from_binary,
+                   AttrTypes.VOLUME_INFORMATION : VolumeInformation.create_from_binary,
+                   AttrTypes.DATA : Data,
+                   AttrTypes.INDEX_ROOT : IndexRoot.create_from_binary,
+                   AttrTypes.INDEX_ALLOCATION : FileName.create_from_binary,
+                   AttrTypes.BITMAP : Bitmap,
+                   AttrTypes.REPARSE_POINT : ReparsePoint.create_from_binary,
+                   AttrTypes.EA_INFORMATION : EaInformation,
+                   AttrTypes.EA : Ea,
+                   AttrTypes.LOGGED_TOOL_STREAM : LoggedToolStream,
+    }
+
+
     def __init__(self, header=None, content=None):
         '''Creates an Attribute object. The content variable is expected to be assigned
         only in case of a resident attribute. It is recommended to use the
@@ -184,38 +203,51 @@ class Attribute():
         if not header.is_non_resident():
             offset = header.resident_header.content_offset
             length = header.resident_header.content_len
-            attr_config = mft_config["attributes"]
-
-            if attr_config["file_name"] and header.attr_type_id is AttrTypes.FILE_NAME:
-                content = FileName.create_from_binary(binary_view[offset:offset+length])
-            elif attr_config["std_info"] and header.attr_type_id is AttrTypes.STANDARD_INFORMATION:
-                content = StandardInformation.create_from_binary(binary_view[offset:offset+length])
-            elif attr_config["idx_root"] and header.attr_type_id is AttrTypes.INDEX_ROOT:
-                content = IndexRoot.create_from_binary(binary_view[offset:offset+length])
-            elif attr_config["attr_list"] and header.attr_type_id is AttrTypes.ATTRIBUTE_LIST:
-                content = AttributeList.create_from_binary(binary_view[offset:offset+length])
-            elif mft_config["datastreams"]["load_content"] and header.attr_type_id is AttrTypes.DATA:
-                content = Data(binary_view[offset:offset+length])
-            elif attr_config["object_id"] and header.attr_type_id is AttrTypes.OBJECT_ID:
-                content = ObjectID.create_from_binary(binary_view[offset:offset+length])
-            elif attr_config["bitmap"] and header.attr_type_id is AttrTypes.BITMAP:
-                content = Bitmap(binary_view[offset:offset+length])
-            elif attr_config["ea_info"] and header.attr_type_id is AttrTypes.EA_INFORMATION:
-                content = EaInformation(binary_view[offset:offset+length])
-            elif attr_config["log_tool_str"] and header.attr_type_id is AttrTypes.LOGGED_TOOL_STREAM:
-                content = LoggedToolStream(binary_view[offset:offset+length])
-            elif attr_config["reparse"] and header.attr_type_id is AttrTypes.REPARSE_POINT:
-                content = ReparsePoint.create_from_binary(binary_view[offset:offset+length])
-            elif attr_config["vol_name"] and header.attr_type_id is AttrTypes.VOLUME_NAME:
-                content = VolumeName.create_from_binary(binary_view[offset:offset+length])
-            elif attr_config["vol_info"] and header.attr_type_id is AttrTypes.VOLUME_INFORMATION:
-                content = VolumeInformation.create_from_binary(binary_view[offset:offset+length])
-            else:
-                #print(self.header.attr_type_id)
-                #TODO log/error when we don't know how to treat an attribute
-                pass
+            content = cls._dispatcher[header.attr_type_id](binary_view[offset:offset+length])
 
         return cls(header, content)
+
+
+    # @classmethod
+    # def create_from_binary(cls, mft_config, binary_view):
+    #     header = AttributeHeader.create_from_binary(mft_config, binary_view)
+    #     content = None
+    #
+    #     if not header.is_non_resident():
+    #         offset = header.resident_header.content_offset
+    #         length = header.resident_header.content_len
+    #         attr_config = mft_config["attributes"]
+    #
+    #         if attr_config["file_name"] and header.attr_type_id is AttrTypes.FILE_NAME:
+    #             content = FileName.create_from_binary(binary_view[offset:offset+length])
+    #         elif attr_config["std_info"] and header.attr_type_id is AttrTypes.STANDARD_INFORMATION:
+    #             content = StandardInformation.create_from_binary(binary_view[offset:offset+length])
+    #         elif attr_config["idx_root"] and header.attr_type_id is AttrTypes.INDEX_ROOT:
+    #             content = IndexRoot.create_from_binary(binary_view[offset:offset+length])
+    #         elif attr_config["attr_list"] and header.attr_type_id is AttrTypes.ATTRIBUTE_LIST:
+    #             content = AttributeList.create_from_binary(binary_view[offset:offset+length])
+    #         elif mft_config["datastreams"]["load_content"] and header.attr_type_id is AttrTypes.DATA:
+    #             content = Data(binary_view[offset:offset+length])
+    #         elif attr_config["object_id"] and header.attr_type_id is AttrTypes.OBJECT_ID:
+    #             content = ObjectID.create_from_binary(binary_view[offset:offset+length])
+    #         elif attr_config["bitmap"] and header.attr_type_id is AttrTypes.BITMAP:
+    #             content = Bitmap(binary_view[offset:offset+length])
+    #         elif attr_config["ea_info"] and header.attr_type_id is AttrTypes.EA_INFORMATION:
+    #             content = EaInformation(binary_view[offset:offset+length])
+    #         elif attr_config["log_tool_str"] and header.attr_type_id is AttrTypes.LOGGED_TOOL_STREAM:
+    #             content = LoggedToolStream(binary_view[offset:offset+length])
+    #         elif attr_config["reparse"] and header.attr_type_id is AttrTypes.REPARSE_POINT:
+    #             content = ReparsePoint.create_from_binary(binary_view[offset:offset+length])
+    #         elif attr_config["vol_name"] and header.attr_type_id is AttrTypes.VOLUME_NAME:
+    #             content = VolumeName.create_from_binary(binary_view[offset:offset+length])
+    #         elif attr_config["vol_info"] and header.attr_type_id is AttrTypes.VOLUME_INFORMATION:
+    #             content = VolumeInformation.create_from_binary(binary_view[offset:offset+length])
+    #         else:
+    #             #print(self.header.attr_type_id)
+    #             #TODO log/error when we don't know how to treat an attribute
+    #             pass
+    #
+    #     return cls(header, content)
 
     def is_non_resident(self):
         '''Helper function to check if an attribute is resident or not. Returns
@@ -284,11 +316,11 @@ class MFTEntry():
         if len(binary_data) != header.entry_alloc_len:
             MOD_LOGGER.error(f"Expected MFT size is different than entry size.")
             raise EntryError(f"Expected MFT size ({len(binary_data)}) is different than entry size ({header.entry_alloc_len}).", binary_data, entry_number)
-        if mft_config["apply_fixup_array"]:
+        #if mft_config["apply_fixup_array"]:
+        if mft_config.apply_fixup_array:
             apply_fixup_array(bin_view, header.fx_offset, header.fx_count, header.entry_alloc_len)
 
-        if mft_config["attributes"]["enable"] or mft_config["datastreams"]["enable"]:
-            entry._load_attributes(mft_config, bin_view[header.first_attr_offset:])
+        entry._load_attributes(mft_config, bin_view[header.first_attr_offset:])
 
         bin_view.release() #release the underlying buffer
 
@@ -322,21 +354,49 @@ class MFTEntry():
         until the end of the entry
         '''
         offset = 0
+        load_attrs = mft_config._load_attrs
+        get_basic_attr_header_info = AttributeHeader.get_basic_attr_header_info
 
         while (attrs_view[offset:offset+4] != b'\xff\xff\xff\xff'):
             #pass all the information to the attr, as we don't know how
             #much content the attribute has
-            attr = Attribute.create_from_binary(mft_config, attrs_view[offset:])
-            if not attr.header.attr_type_id is AttrTypes.DATA:
-                self._add_attribute(attr)
-            else:
-                #print(attr)
-                self._add_datastream(attr)
-            offset += len(attr)
+            #try:
+            attr_type, attr_len = get_basic_attr_header_info(attrs_view[offset:])
+            if attr_type in load_attrs:
+                attr = Attribute.create_from_binary(mft_config, attrs_view[offset:])
+                if not attr.header.attr_type_id is AttrTypes.DATA:
+                    self._add_attribute(attr)
+                else:
+                    #print(attr)
+                    self._add_datastream(attr)
+            #offset += len(attr)
+            offset += attr_len
 
-        #TODO there is always a valid datastream?
-        # if not self.data_stream:
-        #     self.data_stream.append(Datastream())
+
+            # except EntryError as e:
+            #     e.update_entry_number(entry_number)
+            #     e.update_entry_binary(binary_data)
+
+    # def _load_attributes(self, mft_config, attrs_view):
+    #     '''This function receives a view that starts at the first attribute
+    #     until the end of the entry
+    #     '''
+    #     offset = 0
+    #
+    #     while (attrs_view[offset:offset+4] != b'\xff\xff\xff\xff'):
+    #         #pass all the information to the attr, as we don't know how
+    #         #much content the attribute has
+    #         #try:
+    #         attr = Attribute.create_from_binary(mft_config, attrs_view[offset:])
+    #         if not attr.header.attr_type_id is AttrTypes.DATA:
+    #             self._add_attribute(attr)
+    #         else:
+    #             #print(attr)
+    #             self._add_datastream(attr)
+    #         offset += len(attr)
+    #         # except EntryError as e:
+    #         #     e.update_entry_number(entry_number)
+    #         #     e.update_entry_binary(binary_data)
 
     def merge_entries(self, source_entry):
         '''Merge one entry attributes and datastreams with the current entry.
@@ -512,38 +572,76 @@ class _MFTEntryStub():
         return self.__class__.__name__ + '(mft_record={}, seq_number={}, base_record_ref={}, base_record_seq={})'.format(
             self.mft_record, self.seq_number, self.base_record_ref, self.base_record_seq)
 
+class MFTConfig():
+    def __init__(self):
+        self._load_attrs = set()
+        self.entry_size = 0
+        self.apply_fixup_array = True
+        self.ignore_signature_check = True
+        self.load_dataruns = True
+
+        for attr_type in AttrTypes:
+            self._load_attrs.add(attr_type)
+
+    def _get_load_attr(self, attr_type):
+            return attr_type in self._load_attrs
+
+    def _set_load_attr(self, attr_type, case):
+        if case:
+            self._load_attrs.add(attr_type)
+        else:
+            if attr_type in self._load_attrs:
+                self._load_attrs.remove(attr_type)
+
+    load_std_info = property(lambda a: AttrTypes.STANDARD_INFORMATION in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.STANDARD_INFORMATION, x))
+    load_attr_list = property(lambda a: AttrTypes.ATTRIBUTE_LIST in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.ATTRIBUTE_LIST, x))
+    load_file_name = property(lambda a: AttrTypes.FILE_NAME in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.FILE_NAME, x))
+    load_object_id = property(lambda a: AttrTypes.OBJECT_ID in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.OBJECT_ID, x))
+    load_sec_desc = property(lambda a: AttrTypes.SECURITY_DESCRIPTOR in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.SECURITY_DESCRIPTOR, x))
+    load_vol_name = property(lambda a: AttrTypes.VOLUME_NAME in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.VOLUME_NAME, x))
+    load_vol_info = property(lambda a: AttrTypes.VOLUME_INFORMATION in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.VOLUME_INFORMATION, x))
+    load_idx_root = property(lambda a: AttrTypes.INDEX_ROOT in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.INDEX_ROOT, x))
+    load_idx_alloc = property(lambda a: AttrTypes.INDEX_ALLOCATION in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.INDEX_ALLOCATION, x))
+    load_bitmap = property(lambda a: AttrTypes.BITMAP in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.BITMAP, x))
+    load_reparse = property(lambda a: AttrTypes.REPARSE_POINT in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.REPARSE_POINT, x))
+    load_ea_info = property(lambda a: AttrTypes.EA_INFORMATION in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.EA_INFORMATION, x))
+    load_ea = property(lambda a: AttrTypes.EA in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.EA, x))
+    load_log_tool_str = property(lambda a: AttrTypes.LOGGED_TOOL_STREAM in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.LOGGED_TOOL_STREAM, x))
+    load_datastream = property(lambda a: AttrTypes.DATA in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.DATA, x))
+
+
 class MFT():
     '''This class represents a MFT file. It has a bunch of MFT entries
     that have been parsed
     '''
-    mft_config = {"entry_size" : 0, #0 for autodetect
-                  "apply_fixup_array" : True,
-                  "ignore_signature_check": False, #does not check if the signature (FILE or BAD) is valid
-                  "attributes" : {},
-                  "datastreams": {}
-                 }
-    mft_config["attributes"] = {"enable" : True,
-                                "load_dataruns" : True, #dataruns are part of the attribute header
-                                "std_info" : True,
-                                "attr_list" : True,
-                                "file_name" : True,
-                                "object_id" : True,
-                                "sec_desc" : True,
-                                "vol_name" : True,
-                                "vol_info" : True,
-                                "idx_root" : True,
-                                "idx_alloc" : True,
-                                "bitmap" : True,
-                                "reparse" : True,
-                                "ea_info" : True,
-                                "ea" : True,
-                                "log_tool_str" : True
-                               }
-    mft_config["datastreams"] = {"enable" : True,
-                                 "load_content" : True
-                                }
+    # mft_config = {"entry_size" : 0, #0 for autodetect
+    #               "apply_fixup_array" : True,
+    #               "ignore_signature_check": False, #does not check if the signature (FILE or BAD) is valid
+    #               "attributes" : {},
+    #               "datastreams": {}
+    #              }
+    # mft_config["attributes"] = {"enable" : True,
+    #                             "load_dataruns" : True, #dataruns are part of the attribute header
+    #                             "std_info" : True,
+    #                             "attr_list" : True,
+    #                             "file_name" : True,
+    #                             "object_id" : True,
+    #                             "sec_desc" : True,
+    #                             "vol_name" : True,
+    #                             "vol_info" : True,
+    #                             "idx_root" : True,
+    #                             "idx_alloc" : True,
+    #                             "bitmap" : True,
+    #                             "reparse" : True,
+    #                             "ea_info" : True,
+    #                             "ea" : True,
+    #                             "log_tool_str" : True
+    #                            }
+    # mft_config["datastreams"] = {"enable" : True,
+    #                              "load_content" : True
+    #                             }
 
-    def __init__(self, file_pointer, mft_config=None):
+    def __init__(self, file_pointer, mft_config=MFTConfig()):
         #TODO redo documentation
         '''The initialization process takes a file like object "file_pointer"
         and loads it in the internal structures. "use_cores" can be definied
@@ -552,8 +650,9 @@ class MFT():
         it.
         '''
         self.file_pointer = file_pointer
-        self.mft_config = mft_config if mft_config is not None else MFT.mft_config
-        self.mft_entry_size = self.mft_config["entry_size"]
+        #self.mft_config = mft_config if mft_config is not None else MFT.mft_config
+        self.mft_config = mft_config
+        self.mft_entry_size = self.mft_config.entry_size
         self._entries_parent_child = _defaultdict(list) #holds the relation ship between parent and child
         self._empty_entries = set() #holds the empty entries
         self._entries_child_parent = {} #holds the relation between child and parent

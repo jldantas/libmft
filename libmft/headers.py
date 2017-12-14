@@ -92,7 +92,7 @@ class MFTHeader():
         nw_obj = cls()
         baad = None
 
-        if not mft_config["ignore_signature_check"]:
+        if not mft_config.ignore_signature_check:
             if header[0] == b"FILE":
                 baad = False
             elif header[0] == b"BAAD":
@@ -259,8 +259,11 @@ class NonResidentAttrHeader():
         bytearray.
 
         Args:
+            load_dataruns (bool) - Indicates if the dataruns are to be loaded
             binary_view (memoryview of bytearray) - A binary stream with the
                 information of the attribute
+            non_resident_offset (int) - The offset where the non resident header
+                begins
 
         Returns:
             NonResidentAttrHeader: New object using hte binary stream as source
@@ -323,7 +326,7 @@ class AttributeHeader():
         self.attr_name, self.resident_header, self.non_resident_header = content
 
         if self.resident_header is not None and self.non_resident_header is not None:
-            raise HeaderError("An attribute cannot have a resident and a non resident header at the same time.")
+            raise HeaderError("An attribute cannot have a resident and a non resident header at the same time.", "AttributeHeader")
 
     @classmethod
     def create_from_binary(cls, mft_config, binary_view):
@@ -347,8 +350,8 @@ class AttributeHeader():
         if not non_resident:
             resident_header = ResidentAttrHeader._make(cls._REPR_RESIDENT.unpack(binary_view[cls._REPR.size:cls._REPR.size + cls._REPR_RESIDENT.size]))
         else:
-            non_resident_header = NonResidentAttrHeader.create_from_binary(mft_config["attributes"]["load_dataruns"], binary_view, cls._REPR.size)
-
+            #non_resident_header = NonResidentAttrHeader.create_from_binary(mft_config["attributes"]["load_dataruns"], binary_view, cls._REPR.size)
+            non_resident_header = NonResidentAttrHeader.create_from_binary(mft_config.load_dataruns, binary_view, cls._REPR.size)
         if name_len:
             attr_name = binary_view[name_offset:name_offset+(2*name_len)].tobytes().decode("utf_16_le")
         else:
@@ -371,11 +374,10 @@ class AttributeHeader():
         '''Return the resident attribute header size.'''
         return cls._REPR_RESIDENT.size
 
-    @classmethod
-    def get_non_resident_header_size(cls):
-        '''Return the non resident attribute header size WITHOUT account for the
-        datarun size or information.'''
-        return cls._REPR_NONRESIDENT.size
+    @staticmethod
+    def get_basic_attr_header_info(bin_view):
+        return AttrTypes(int.from_bytes(bin_view[:4], "little", signed=False)), \
+            int.from_bytes(bin_view[4:8], "little", signed=False)
 
     def is_non_resident(self):
         if self.resident_header:
