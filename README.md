@@ -20,7 +20,7 @@ Python >= 3.6
 Apparently, Microsoft has some mystic rules related to how maintain the MFT records.
 
 Because of that, some things don't make sense when parsing the MFT and some others
-are unknow to the community. As such, this information can be "safely" ignored.
+are unknown to the community. As such, this information can be "safely" ignored.
 This way we can speed up the processing and decrease the memory footprint.
 
 All these particular observations and cases are documented here.
