@@ -7,13 +7,22 @@ MFT records.
 
 ## Getting started
 
-TODO
-
-At the moment, this is still in development stage. Things are supposed to fail or break
-
 ### Prerequisites
 
 Python >= 3.6
+
+### Installation
+
+```
+pip install libmft
+```
+
+### Usage
+
+(TODO document everything in an easy way)
+
+Most of the code is documented and some things I wrote that can be useful are in
+the `recipes.py`
 
 ## Observations (#TODO document this somewhere else)
 
