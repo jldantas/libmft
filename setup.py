@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
     name = "libmft",
-    version = "0.5",
+    version = "0.6",
     author = "Julio Dantas",
     description = "A pure python library to parse MFT entries",
     url = "https://github.com/jldantas/libmft",
@@ -21,5 +21,5 @@ setup(
     ],
     keywords = "mft parser library python",
     python_requires = ">=3.6",
-    packages = ["libmft"],
+    packages = find_packages(exclude=['contrib', 'docs', 'tests*']),
 )
