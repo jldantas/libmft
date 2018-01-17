@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name = "libmft",
-    version = "0.6",
+    version = "0.7",
     author = "Julio Dantas",
     description = "A pure python library to parse MFT entries",
     url = "https://github.com/jldantas/libmft",

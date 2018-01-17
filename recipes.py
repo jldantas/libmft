@@ -8,7 +8,7 @@ from libmft.flagsandtypes import AttrTypes, FileInfoFlags, MftUsageFlags
 _MOD_LOGGER = logging.getLogger("libmft")
 sh = logging.StreamHandler()
 _MOD_LOGGER.addHandler(sh)
-_MOD_LOGGER.setLevel(logging.DEBUG)
+_MOD_LOGGER.setLevel(logging.WARNING)
 
 #test = "./mft_samples/MFT_singlefile.bin"
 #test = "./mft_samples/MFT_singlefileads.bin"
@@ -52,102 +52,6 @@ def get_full_path(mft, fn_attr):
             break
 
     return "\\".join(reversed(names))
-
-#------------------------------------------------------------------------------
-# RECIPE 2 - Get
-#------------------------------------------------------------------------------
-def pretty_print(data):
-    print("--------------------------------")
-    print("path:", data["path"])
-    print("readonly:", data["readonly"], "\thidden:", data["hidden"], "\tsystem:", data["system"], "\tencrypted:", data["encrypted"])
-    print("is_deleted:", data["is_deleted"], "\tis_directory:", data["is_directory"], "\tis_ads:", data["is_ads"])
-    print("entry_n:", data["entry_n"], "\tsize:", data["size"], "\tallocated size:", data["alloc_size"])
-    print("**STD_TIMES**")
-    print("\tcreated:", data["std_created"], "\tchanged:", data["std_changed"])
-    print("\tmft_change:", data["std_mft_change"], "\taccessed:", data["std_accessed"])
-    print("**FN_TIMES**")
-    print("\tcreated:", data["fn_created"], "\tchanged:", data["fn_changed"])
-    print("\tmft_change:", data["fn_mft_change"], "\taccessed:", data["fn_accessed"])
-
-def build_info_entry(mft, entry, std_info, fn_attr, ds):
-    data = {}
-    data["is_deleted"] = entry.is_deleted()
-    data["is_directory"] = entry.is_directory()
-    data["entry_n"] = entry.header.mft_record
-    data["std_created"] = std_info.content.get_created_time()
-    data["std_changed"] = std_info.content.get_changed_time()
-    data["std_mft_change"] = std_info.content.get_mftchange_time()
-    data["std_accessed"] = std_info.content.get_accessed_time()
-    data["fn_created"] = fn_attr.content.get_created_time()
-    data["fn_changed"] = fn_attr.content.get_changed_time()
-    data["fn_mft_change"] = fn_attr.content.get_mftchange_time()
-    data["fn_accessed"] = fn_attr.content.get_accessed_time()
-    if ds.name is None:
-        data["path"] = get_full_path(mft, fn_attr)
-        data["is_ads"] = False
-    else:
-        data["path"] = ":".join((get_full_path(mft, fn_attr), ds.name))
-        data["is_ads"] = True
-    data["size"] = ds.size
-    data["alloc_size"] = ds.alloc_size
-
-    data["readonly"] = True if std_info.content.flags & libmft.flagsandtypes.FileInfoFlags.READ_ONLY else False
-    data["hidden"] = True if std_info.content.flags & libmft.flagsandtypes.FileInfoFlags.HIDDEN else False
-    data["system"] = True if std_info.content.flags & libmft.flagsandtypes.FileInfoFlags.SYSTEM else False
-    data["encrypted"] = True if std_info.content.flags & libmft.flagsandtypes.FileInfoFlags.ENCRYPTED else False
-
-    return data
-
-def test_1(mft):
-    entry_n = 75429
-
-    #entry = mft[entry_n]
-    default_stream = libmft.api.Datastream()
-    fake_time = libmft.util.functions.convert_filetime(0)
-    default_filename = libmft.api.Attribute(None, libmft.attrcontent.FileName((5, mft[5].header.seq_number, fake_time, fake_time, fake_time, fake_time, libmft.flagsandtypes.FileInfoFlags(0), -1, 0, libmft.flagsandtypes.NameType.POSIX, "INVALID")))
-    for entry in mft:
-        #print(entry)
-
-        #sometimes entries have no attributes and are marked as deleted, there is no information there
-        if not entry.attrs and not entry.header.usage_flags:
-            continue
-        #other times, we might have a partial entry (entry that has been deleted,
-        #but occupied more than one entry) and not have the basic attribute information
-        #like STANDARD_INFORMATION or FILENAME, in these cases, ignore as well
-        if not entry.header.usage_flags & libmft.flagsandtypes.MftUsageFlags.IN_USE and entry.get_attributes(AttrTypes.STANDARD_INFORMATION) is None:
-            continue
-
-        main_ds = default_stream
-        std_info = entry.get_attributes(AttrTypes.STANDARD_INFORMATION)[0]
-        fn_attrs = entry.get_unique_filename_attrs()
-        main_fn = entry.get_main_filename_attr()
-        if not fn_attrs:
-            fn_attrs = [default_filename]
-            main_fn = default_filename
-        ds_names = entry.get_datastream_names()
-        if ds_names is not None:
-            for ds_name in ds_names:
-                pretty_print(build_info_entry(mft, entry, std_info, main_fn, entry.get_datastream(ds_name)))
-            if None in ds_names:
-                main_ds = entry.get_datastream()
-        else:
-            pretty_print(build_info_entry(mft, entry, std_info, main_fn, default_stream))
-
-        for fn in fn_attrs:
-            if fn.content.parent_ref != main_fn.content.parent_ref:
-                pretty_print(build_info_entry(mft, entry, std_info, fn, main_ds))
-
-
-    # fn_attrs = mft[entry_n].get_unique_filename_attrs()
-    # main_ds = mft[entry_n].get_datastream()
-    # for fn in fn_attrs:
-    #     print(get_full_path(mft, fn), fn, main_ds)
-
-    entry_n = 4584
-    entry_n = 75429
-    print(mft[entry_n].get_main_filename_attr())
-    print(mft[entry_n].get_datastream_names())
-
 
 def stress_filename(mft_config):
     sample = "./mft_samples/stress_filename.bin"

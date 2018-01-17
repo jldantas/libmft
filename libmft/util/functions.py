@@ -4,13 +4,16 @@ This module contains auxiliar functions to the library.
 '''
 import logging
 import itertools
-from datetime import datetime as _datetime, timedelta as _timedelta
+from datetime import datetime as _datetime, timedelta as _timedelta, timezone
 from collections import Iterable
+from functools import lru_cache
 
 from libmft.exceptions import FixUpError
 
 MOD_LOGGER = logging.getLogger(__name__)
+_UTC = timezone.utc
 
+@lru_cache(512)
 def convert_filetime(filetime):
     '''Convert FILETIME64 to datetime object. There is no interpretation of
     timezones. If the encoded format has a timezone, it will be returned as if
@@ -22,7 +25,8 @@ def convert_filetime(filetime):
     Returns:
         datetime: The int converted to datetime.
     '''
-    return _datetime(1601, 1, 1) + _timedelta(microseconds=(filetime/10))
+    #return _datetime(1601, 1, 1) + _timedelta(microseconds=(filetime/10))
+    return _datetime(1601, 1, 1, tzinfo=_UTC) + _timedelta(microseconds=(filetime/10))
 
 def get_file_reference(file_ref):
     '''Convert a 32 bits number into the 2 bytes reference and the 6

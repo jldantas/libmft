@@ -101,6 +101,11 @@ P.S.: The implementation I used can be seen in the file parallel.py
 
 ## CHANGELOG
 
+### Version 0.7
+
+- Changed the datetime objects to aware objects (UTC timezone)
+- Implemented caching (lru_cache) for converting times for performance optimization
+
 ### Version 0.5
 
 - Removed the STANDARD_INFORMATION versions and "class ID" fields
