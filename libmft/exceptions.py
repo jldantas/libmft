@@ -33,6 +33,9 @@ class MFTException(Exception):
 class MFTError(MFTException):
     pass
 
+class ContentError(MFTException):
+    pass
+
 class FixUpError(MFTException):
     '''An exception for problems when applying the fixup array'''
     def __init__(self, msg):

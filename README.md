@@ -101,6 +101,12 @@ P.S.: The implementation I used can be seen in the file parallel.py
 
 ## CHANGELOG
 
+### Current CL
+
+- Added removed entries to the STANDARD_INFORMATION attribute
+- Added abstract class for content
+- Moved timestamps to its own class
+
 ### Version 0.7
 
 - Changed the datetime objects to aware objects (UTC timezone)

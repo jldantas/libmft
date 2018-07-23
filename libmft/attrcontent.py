@@ -12,10 +12,12 @@ import struct
 import logging
 from itertools import chain as _chain
 from operator import getitem as _getitem
+from abc import ABCMeta, abstractmethod
 
 from libmft.util.functions import convert_filetime, get_file_reference
 from libmft.flagsandtypes import AttrTypes, NameType, FileInfoFlags, \
     IndexEntryFlags, VolumeFlags, ReparseType, ReparseFlags, CollationRule
+from libmft.exceptions import ContentError
 
 _MOD_LOGGER = logging.getLogger(__name__)
 
@@ -24,19 +26,90 @@ _MOD_LOGGER = logging.getLogger(__name__)
 
 #TODO rewrite the commentaries
 
+
+#******************************************************************************
+# ABSTRACT CLASS FOR ATTRIBUTE CONTENT
+#******************************************************************************
+class AttributeContent(metaclass=ABCMeta):
+    @classmethod
+    @abstractmethod
+    def create_from_binary(cls, binary_stream):
+        pass
+
+class Timestamps(AttributeContent):
+    _REPR = struct.Struct("<4Q")
+
+    def __init__(self, content=(None,)*4):
+        '''Represents a timestamp and uses exactly a 4-element tuple
+
+        Args:
+            content (iterable), where:
+                [0] (datetime) - created time
+                [1] (datetime) - changed time
+                [2] (datetime) - mft change time
+                [3] (datetime) - accessed
+        '''
+        self.created, self.changed, self.mft_changed, self.accessed = content
+
+    def change_timezone(self, timezone):
+        #TODO implement this
+        pass
+
+    #TODO convert to __len__?
+    @classmethod
+    def get_content_size(cls):
+        return cls._REPR.size
+
+    @classmethod
+    def create_from_binary(cls, binary_stream):
+        '''Creates a new object Timestamps from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray.
+
+        Args:
+            binary_view (memoryview of bytearray) - A binary stream with the
+                information of the attribute
+
+        Returns:
+            Timestamps: New object using hte binary stream as source
+        '''
+        repr = cls._REPR
+
+        if len(binary_stream) != repr.size:
+            raise ContentError("Invalid binary stream size")
+
+        _MOD_LOGGER.debug("Unpacking TIMESTAMPS content")
+        content = repr.unpack(binary_stream)
+        nw_obj = cls()
+        nw_obj.created = convert_filetime(content[0])
+        nw_obj.changed = convert_filetime(content[1])
+        nw_obj.mft_changed = convert_filetime(content[2])
+        nw_obj.accessed = convert_filetime(content[3])
+        _MOD_LOGGER.debug(f"Timestamp created: {nw_obj}")
+        _MOD_LOGGER.debug("TIMESTAMPS object created successfully")
+
+        return nw_obj
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return self.__class__.__name__ + '(created={}, changed={}, mft_changed={}, accessed={})'.format(
+            self.created, self.changed, self.mft_changed, self.accessed)
+
 #******************************************************************************
 # STANDARD_INFORMATION ATTRIBUTE
 #******************************************************************************
-class StandardInformation():
+class StandardInformation(AttributeContent):
     '''Represents the STANDARD_INFORMATION converting the timestamps to
     datetimes and the flags to FileInfoFlags representation.'''
-    #_REPR = struct.Struct("<4Q4I")
-    _REPR = struct.Struct("<4QI12x")
-    _REPR_NFTS_3_EXTENSION = struct.Struct("<2I2Q")
-    ''' Creation time - 8
-        File altered time - 8
-        MFT/Metadata altered time - 8
-        Accessed time - 8
+    _TIMESTAMP_SIZE = Timestamps.get_content_size() #TODO looks ugly... fix
+    _REPR = struct.Struct("<4I2I2Q")
+    _REPR_NO_NFTS_3_EXTENSION = struct.Struct("<4I")
+    '''
+        TIMESTAMPS(32)
+            Creation time - 8
+            File altered time - 8
+            MFT/Metadata altered time - 8
+            Accessed time - 8
         Flags - 4 (FileInfoFlags)
         Maximum number of versions - 4
         Version number - 4
@@ -47,7 +120,7 @@ class StandardInformation():
         Update Sequence Number (USN) - 8 (NTFS 3+)
     '''
 
-    def __init__(self, content=(None,)*9):
+    def __init__(self, content=(None,)*8):
         '''Creates a StandardInformation object. The content has to be an iterable
         with precisely 0 elements in order.
         If content is not provided, a 0 element tuple, where all elements are
@@ -55,35 +128,34 @@ class StandardInformation():
 
         Args:
             content (iterable), where:
-                [0] (datetime) - created time
-                [1] (datetime) - changed time
-                [2] (datetime) - mft change time
-                [3] (datetime) - accessed
-                [4] (FileInfoFlags) - flags
-                [5] (int) - Owner id
-                [6] (int) - Security id
-                [7] (int) - Quota charged
-                [8] (int) - Update Sequence Number
+                [0] (Timestamps) - Timestamp object with the correct timestamps
+                [1] (FileInfoFlags) - flags
+                [2] (int) - maximum number of versions
+                [3] (int) - version number
+                [4] (int) - Owner id
+                [5] (int) - Security id
+                [6] (int) - Quota charged
+                [7] (int) - Update Sequence Number
         '''
-        self.timestamps = {}
-
-        self.timestamps["created"], self.timestamps["changed"], \
-        self.timestamps["mft_change"], self.timestamps["accessed"], \
-        self.flags, self.owner_id, \
+        self.timestamps, self.flags, self.max_n_versions, self.version_number, \
+        self.class_id, self.owner_id,  \
         self.security_id, self.quota_charged, self.usn = content
 
     @classmethod
-    def get_static_content_size(cls):
+    def get_content_size(cls, ntfs3=True):
         '''Returns the static size of the content never taking in consideration
         variable fields, for example, names.
 
         Returns:
             int: The size of the content, in bytes
         '''
-        return cls._REPR.size + cls._REPR_NFTS_3_EXTENSION.size
+        if ntfs3:
+            return cls._TIMESTAMP_SIZE + cls._REPR.size
+        else:
+            return cls._TIMESTAMP_SIZE + cls._REPR_NO_NFTS_3_EXTENSION.size
 
     @classmethod
-    def create_from_binary(cls, binary_view):
+    def create_from_binary(cls, binary_stream):
         '''Creates a new object StandardInformation from a binary stream. The binary
         stream can be represented by a byte string, bytearray or a memoryview of the
         bytearray.
@@ -96,61 +168,27 @@ class StandardInformation():
             StandardInformation: New object using hte binary stream as source
         '''
         _MOD_LOGGER.debug("Unpacking STANDARD_INFORMATION content")
-        main_content = cls._REPR.unpack(binary_view[:cls._REPR.size])
-        if len(binary_view) != cls._REPR.size:
-            _MOD_LOGGER.debug("Unpacking NTFS 3 extesion")
-            ntfs3_extension = cls._REPR_NFTS_3_EXTENSION.unpack(binary_view[cls._REPR.size:])
+
+        timestamps = Timestamps.create_from_binary(binary_stream[:cls._TIMESTAMP_SIZE])
+        if len(binary_stream) == cls._TIMESTAMP_SIZE + cls._REPR.size:
+            _MOD_LOGGER.debug("Unpacking STDInfo with NTFS 3 extension")
+            main_content = cls._REPR.unpack(binary_stream[cls._TIMESTAMP_SIZE:])
+            nw_obj = cls(_chain((timestamps,), main_content))
         else:
-            ntfs3_extension = (None, None, None, None)
-        #create the new object with "raw types"
-        nw_obj = cls(_chain(main_content, ntfs3_extension))
-        #update the object converting to the correct types
-        nw_obj.timestamps["created"] = convert_filetime(nw_obj.timestamps["created"])
-        nw_obj.timestamps["changed"] = convert_filetime(nw_obj.timestamps["changed"])
-        nw_obj.timestamps["mft_change"] = convert_filetime(nw_obj.timestamps["mft_change"])
-        nw_obj.timestamps["accessed"] = convert_filetime(nw_obj.timestamps["accessed"])
+            _MOD_LOGGER.debug("Unpacking STDInfo without NTFS 3 extension")
+            main_content = cls._REPR_NO_NFTS_3_EXTENSION.unpack(binary_stream[cls._TIMESTAMP_SIZE:])
+            nw_obj = cls(_chain((timestamps,), main_content, (None, None, None, None)))
         nw_obj.flags = FileInfoFlags(nw_obj.flags)
         _MOD_LOGGER.debug("StandardInformation object created successfully")
 
         return nw_obj
 
-    def get_created_time(self):
-        '''Returns the created time. This function provides the same information
-        as using <variable>.timestamps["created"].
-
-        Returns:
-            datetime: The created time'''
-        return self.timestamps["created"]
-
-    def get_changed_time(self):
-        '''Returns the changed time. This function provides the same information
-        as using <variable>.timestamps["changed"].
-
-        Returns:
-            datetime: The changed time'''
-        return self.timestamps["changed"]
-
-    def get_mftchange_time(self):
-        '''Returns the mft change time. This function provides the same information
-        as using <variable>.timestamps["mft_change"].
-
-        Returns:
-            datetime: The mft change time'''
-        return self.timestamps["mft_change"]
-
-    def get_accessed_time(self):
-        '''Returns the accessed time. This function provides the same information
-        as using <variable>.timestamps["accessed"].
-
-        Returns:
-            datetime: The accessed time'''
-        return self.timestamps["accessed"]
-
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(timestamps={}, flags={!s}, owner_id={}, security_id={}, quota_charged={}, usn={})'.format(
-            self.timestamps, self.flags, self.owner_id, self.security_id,
-            self.quota_charged, self.usn)
+        return self.__class__.__name__ + '(timestamps={!s}, flags={!s}, max_n_versions={}, version_number={}, class_id={}, owner_id={}, security_id={}, quota_charged={}, usn={})'.format(
+            self.timestamps, self.flags, self.max_n_versions, self.version_number,
+            self.class_id, self.owner_id,  self.security_id, self.quota_charged,
+            self.usn)
 
 #******************************************************************************
 # ATTRIBUTE_LIST ATTRIBUTE

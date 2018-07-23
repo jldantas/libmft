@@ -10,8 +10,9 @@ from functools import lru_cache
 
 from libmft.exceptions import FixUpError
 
-MOD_LOGGER = logging.getLogger(__name__)
+_MOD_LOGGER = logging.getLogger(__name__)
 _UTC = timezone.utc
+_BASE_DATE_FILETIME64 = _datetime(1601, 1, 1, tzinfo=_UTC)
 
 @lru_cache(512)
 def convert_filetime(filetime):
@@ -26,7 +27,7 @@ def convert_filetime(filetime):
         datetime: The int converted to datetime.
     '''
     #return _datetime(1601, 1, 1) + _timedelta(microseconds=(filetime/10))
-    return _datetime(1601, 1, 1, tzinfo=_UTC) + _timedelta(microseconds=(filetime/10))
+    return _BASE_DATE_FILETIME64 + _timedelta(microseconds=(filetime/10))
 
 def get_file_reference(file_ref):
     '''Convert a 32 bits number into the 2 bytes reference and the 6
@@ -65,11 +66,11 @@ def apply_fixup_array(bin_view, fx_offset, fx_count, entry_size):
             #the replaced part must always match the signature!
             bin_view[position:position+2] = fx_array[index * 2:(index * 2) + 2]
         else:
-            MOD_LOGGER.error("Error applying the fixup array")
+            _MOD_LOGGER.error("Error applying the fixup array")
             raise FixUpError(f"Signature {fx_array[:2].tobytes()} does not match {bin_view[position:position+2].tobytes()} at offset {position}.")
         index += 1
         position = (sector_size * index) - 2
-    MOD_LOGGER.info("Fix up array applied successfully.")
+    _MOD_LOGGER.info("Fix up array applied successfully.")
 
 def flatten(iterable):
     '''This function allows a simple a way to iterate over a "complex" iterable, for example,
