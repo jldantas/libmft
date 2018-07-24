@@ -8,61 +8,51 @@ from libmft.attrcontent import Timestamps, StandardInformation#, StandardInforma
 from libmft.util.functions import convert_filetime
 from libmft.exceptions import *
 
-class TestDateTimeConversion(unittest.TestCase):
-    def test_zero(self):
-        base = datetime.datetime(1601, 1, 1, tzinfo=datetime.timezone.utc)
-        self.assertEqual(convert_filetime(0), base)
-        pass
-
-    def test_microseconds(self):
-        base = datetime.datetime(1601, 1, 1, microsecond=10, tzinfo=datetime.timezone.utc)
-        self.assertEqual(convert_filetime(100), base)
-        pass
-
-    def test_normal_number(self):
-        base = datetime.datetime(4198, 6, 12, 10, 17, 3, 124368, tzinfo=datetime.timezone.utc)
-        self.assertEqual(convert_filetime(819674578231243602), base)
     #a = "\x38\x98\x35\xBA\xDD\x42\xD3\x01"
 
+class TestMFT(unittest.TestCase):
+    std_info_raw = b"\x38\x98\x35\xBA\xDD\x42\xD3\x01\x38\x98\x35\xBA\xDD\x42\xD3\x01\x38\x98\x35\xBA\xDD\x42\xD3\x01\x38\x98\x35\xBA\xDD\x42\xD3\x01\x06\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
 
-class TestTimestamps(unittest.TestCase):
-    zero = b"\x00\x00\x00\x00\x00\x00\x00\x00"
-    full = b"\x38\x98\x35\xBA\xAD\x42\xD3\x01\x36\x98\x35\xBA\xDD\x42\xD3\x01\x38\x08\x35\xBA\xDD\x42\xD3\x01\x38\x98\x35\x7A\xDD\x42\xD3\x01"
-    all_zero = Timestamps.create_from_binary(zero * 4)
-    base = datetime.datetime(1601, 1, 1, tzinfo=datetime.timezone.utc)
-    t_full = Timestamps.create_from_binary(full)
+    def test_date_time_conversion(self):
+        zero = datetime.datetime(1601, 1, 1, tzinfo=datetime.timezone.utc)
+        msec = datetime.datetime(1601, 1, 1, microsecond=10, tzinfo=datetime.timezone.utc)
+        normal = datetime.datetime(4198, 6, 12, 10, 17, 3, 124368, tzinfo=datetime.timezone.utc)
+        self.assertEqual(convert_filetime(0), zero)
+        self.assertEqual(convert_filetime(100), msec)
+        self.assertEqual(convert_filetime(819674578231243602), normal)
 
-    def test_created_zero(self):
-        self.assertEqual(self.all_zero.created, self.base)
+    def test_timestamp_creation(self):
+        full = b"\x38\x98\x35\xBA\xAD\x42\xD3\x01\x36\x98\x35\xBA\xDD\x42\xD3\x01\x38\x08\x35\xBA\xDD\x42\xD3\x01\x38\x98\x35\x7A\xDD\x42\xD3\x01"
+        t_full = Timestamps.create_from_binary(full)
+        crtime = datetime.datetime(2017, 10, 11, 16, 26, 44, 472632, tzinfo=datetime.timezone.utc)
+        mtime = datetime.datetime(2017, 10, 11, 22, 10, 20, 315654, tzinfo=datetime.timezone.utc)
+        ctime = datetime.datetime(2017, 10, 11, 22, 10, 20, 311968, tzinfo=datetime.timezone.utc)
+        atime = datetime.datetime(2017, 10, 11, 22, 8, 32, 941472, tzinfo=datetime.timezone.utc)
+        self.assertEqual(t_full.created, crtime)
+        self.assertEqual(t_full.changed, mtime)
+        self.assertEqual(t_full.mft_changed, ctime)
+        self.assertEqual(t_full.accessed, atime)
 
-    def test_changed_zero(self):
-        self.assertEqual(self.all_zero.changed, self.base)
+    def test_timestamp_comparison(self):
+        full = b"\x38\x98\x35\xBA\xAD\x42\xD3\x01\x36\x98\x35\xBA\xDD\x42\xD3\x01\x38\x08\x35\xBA\xDD\x42\xD3\x01\x38\x98\x35\x7A\xDD\x42\xD3\x01"
+        t_full = Timestamps.create_from_binary(full)
+        t_full2 = Timestamps.create_from_binary(full)
+        t_zero = Timestamps.create_from_binary(b"\x00" * Timestamps.get_content_size())
+        self.assertEqual(t_full, t_full2)
+        self.assertNotEqual(t_full, t_zero)
 
-    def test_mft_changed_zero(self):
-        self.assertEqual(self.all_zero.mft_changed, self.base)
-
-    def test_accessed_zero(self):
-        self.assertEqual(self.all_zero.accessed, self.base)
-
-    def test_wrong_size_binary_stream(self):
+    def test_timestamp_binary_error(self):
         with self.assertRaises(ContentError):
-            Timestamps.create_from_binary(self.zero * 2)
+            Timestamps.create_from_binary(b"\x00" * 2)
 
-    def test_created_full(self):
-        a = datetime.datetime(2017, 10, 11, 16, 26, 44, 472632, tzinfo=datetime.timezone.utc)
-        self.assertEqual(self.t_full.created, a)
+    def test_standard_info_creation(self):
+        a = b"\x38\x98\x35\xBA\xDD\x42\xD3\x01\x38\x98\x35\xBA\xDD\x42\xD3\x01\x38\x98\x35\xBA\xDD\x42\xD3\x01\x38\x98\x35\xBA\xDD\x42\xD3\x01\x06\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+        #std_info = StandardInformation(())
 
-    def test_changed_full(self):
-        a = datetime.datetime(2017, 10, 11, 22, 10, 20, 315654, tzinfo=datetime.timezone.utc)
-        self.assertEqual(self.t_full.changed, a)
+        #StandardInformation(timestamps=Timestamps(created=2017-10-11 22:10:20.315654+00:00, changed=2017-10-11 22:10:20.315654+00:00, mft_changed=2017-10-11 22:10:20.315654+00:00, accessed=2017-10-11 22:10:20.315654+00:00), flags=FileInfoFlags.SYSTEM|HIDDEN, max_n_versions=0, version_number=0, class_id=0, owner_id=0, security_id=256, quota_charged=0, usn=0)
 
-    def test_mft_changed_full(self):
-        a = datetime.datetime(2017, 10, 11, 22, 10, 20, 311968, tzinfo=datetime.timezone.utc)
-        self.assertEqual(self.t_full.mft_changed, a)
+        #StandardInformation(timestamps=Timestamps(created=2016-09-06 14:12:02+00:00, changed=2016-09-06 14:12:02+00:00, mft_changed=2017-10-11 13:59:11.710392+00:00, accessed=2017-10-11 13:59:11.710392+00:00), flags=FileInfoFlags.ARCHIVE, max_n_versions=0, version_number=0, class_id=0, owner_id=0, security_id=749, quota_charged=0, usn=25019616)
 
-    def test_accessed_full(self):
-        a = datetime.datetime(2017, 10, 11, 22, 8, 32, 941472, tzinfo=datetime.timezone.utc)
-        self.assertEqual(self.t_full.accessed, a)
 
 
 def main():
@@ -78,6 +68,7 @@ def main():
     b = b"\x00\x25\x72\xA3\x48\x08\xD2\x01\x00\x25\x72\xA3\x48\x08\xD2\x01\x29\x47\x8D\x1D\x99\x42\xD3\x01\x29\x47\x8D\x1D\x99\x42\xD3\x01\x20\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xED\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xE0\xC4\x7D\x01\x00\x00\x00\x00"
     c = StandardInformation.create_from_binary(a)
     d = StandardInformation.create_from_binary(b)
+
     #c1 = StandardInformation2.create_from_binary(a)
     #d1 = StandardInformation2.create_from_binary(b)
     print(c)

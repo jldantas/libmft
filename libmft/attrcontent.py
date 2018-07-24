@@ -90,6 +90,12 @@ class Timestamps(AttributeContent):
 
         return nw_obj
 
+    def __eq__(self, other):
+        if isinstance(other, Timestamps):
+            return self.created == other.created and self.changed == other.changed \
+                and self.mft_changed == other.mft_changed and self.accessed == other.accessed
+        return False
+
     def __repr__(self):
         'Return a nicely formatted representation string'
         return self.__class__.__name__ + '(created={}, changed={}, mft_changed={}, accessed={})'.format(
@@ -182,6 +188,15 @@ class StandardInformation(AttributeContent):
         _MOD_LOGGER.debug("StandardInformation object created successfully")
 
         return nw_obj
+
+    def __eq__(self, other):
+        if isinstance(other, StandardInformation):
+            return self.timestamps == other.timestamps and self.flags == other.flags \
+                and self.max_n_versions == other.max_n_versions and self.version_number == other.version_number \
+                and self.class_id == other.class_id and self.owner_id == other.owner_id \
+                and self.security_id == other.security_id and self.quota_charged == other.quota_charged \
+                and self.usn == other.usn
+        return False
 
     def __repr__(self):
         'Return a nicely formatted representation string'
