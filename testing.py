@@ -4,7 +4,7 @@ import datetime
 #import libmft.api
 #from libmft.flagsandtypes import AttrTypes, FileInfoFlags, MftUsageFlags
 
-from libmft.attrcontent import Timestamps, StandardInformation#, StandardInformation2
+from libmft.attrcontent import Timestamps, StandardInformation, FileName
 from libmft.util.functions import convert_filetime
 from libmft.exceptions import *
 
@@ -37,7 +37,7 @@ class TestMFT(unittest.TestCase):
         full = b"\x38\x98\x35\xBA\xAD\x42\xD3\x01\x36\x98\x35\xBA\xDD\x42\xD3\x01\x38\x08\x35\xBA\xDD\x42\xD3\x01\x38\x98\x35\x7A\xDD\x42\xD3\x01"
         t_full = Timestamps.create_from_binary(full)
         t_full2 = Timestamps.create_from_binary(full)
-        t_zero = Timestamps.create_from_binary(b"\x00" * Timestamps.get_content_size())
+        t_zero = Timestamps.create_from_binary(b"\x00" * Timestamps.get_representation_size())
         self.assertEqual(t_full, t_full2)
         self.assertNotEqual(t_full, t_zero)
 
@@ -71,9 +71,12 @@ def main():
 
     #c1 = StandardInformation2.create_from_binary(a)
     #d1 = StandardInformation2.create_from_binary(b)
-    print(c)
+
+    a = b"\x87\x60\x02\x00\x00\x00\x02\x00\x29\x47\x8D\x1D\x99\x42\xD3\x01\x29\x47\x8D\x1D\x99\x42\xD3\x01\x29\x47\x8D\x1D\x99\x42\xD3\x01\x29\x47\x8D\x1D\x99\x42\xD3\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x20\x00\x00\x00\x00\x00\x00\x00\x0C\x02\x43\x00\x49\x00\x53\x00\x43\x00\x4F\x00\x45\x00\x7E\x00\x31\x00\x2E\x00\x43\x00\x48\x00\x4D\x00"
+    print(FileName.create_from_binary(memoryview(a)))
+    #print(c)
     print()
-    print(d)
+    #print(d)
     print("-"*80)
     #print(c1, "\n\n", d1)
 

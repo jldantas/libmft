@@ -34,6 +34,22 @@ class AttributeContent(metaclass=ABCMeta):
     @classmethod
     @abstractmethod
     def create_from_binary(cls, binary_stream):
+        '''Create the class from a binary stream'''
+        pass
+
+    @classmethod
+    @abstractmethod
+    def get_representation_size(cls):
+        '''Get the representation size in bytes, based on defined struct'''
+        pass
+
+    @abstractmethod
+    def __len__(self):
+        '''Get the actual size of the content, as some attributes have variable sizes'''
+        pass
+
+    @abstractmethod
+    def __eq__(self, other):
         pass
 
 class Timestamps(AttributeContent):
@@ -55,9 +71,9 @@ class Timestamps(AttributeContent):
         #TODO implement this
         pass
 
-    #TODO convert to __len__?
+
     @classmethod
-    def get_content_size(cls):
+    def get_representation_size(cls):
         return cls._REPR.size
 
     @classmethod
@@ -81,10 +97,9 @@ class Timestamps(AttributeContent):
         _MOD_LOGGER.debug("Unpacking TIMESTAMPS content")
         content = repr.unpack(binary_stream)
         nw_obj = cls()
-        nw_obj.created = convert_filetime(content[0])
-        nw_obj.changed = convert_filetime(content[1])
-        nw_obj.mft_changed = convert_filetime(content[2])
-        nw_obj.accessed = convert_filetime(content[3])
+        nw_obj.created, nw_obj.changed, nw_obj.mft_changed, nw_obj.accessed = \
+            convert_filetime(content[0]), convert_filetime(content[1]), \
+            convert_filetime(content[2]), convert_filetime(content[3])
         _MOD_LOGGER.debug(f"Timestamp created: {nw_obj}")
         _MOD_LOGGER.debug("TIMESTAMPS object created successfully")
 
@@ -95,6 +110,9 @@ class Timestamps(AttributeContent):
             return self.created == other.created and self.changed == other.changed \
                 and self.mft_changed == other.mft_changed and self.accessed == other.accessed
         return False
+
+    def __len__(self):
+        return Timestamps._REPR.size
 
     def __repr__(self):
         'Return a nicely formatted representation string'
@@ -107,7 +125,7 @@ class Timestamps(AttributeContent):
 class StandardInformation(AttributeContent):
     '''Represents the STANDARD_INFORMATION converting the timestamps to
     datetimes and the flags to FileInfoFlags representation.'''
-    _TIMESTAMP_SIZE = Timestamps.get_content_size() #TODO looks ugly... fix
+    _TIMESTAMP_SIZE = Timestamps.get_representation_size() #TODO looks ugly... fix
     _REPR = struct.Struct("<4I2I2Q")
     _REPR_NO_NFTS_3_EXTENSION = struct.Struct("<4I")
     '''
@@ -148,17 +166,15 @@ class StandardInformation(AttributeContent):
         self.security_id, self.quota_charged, self.usn = content
 
     @classmethod
-    def get_content_size(cls, ntfs3=True):
+    def get_representation_size(cls):
         '''Returns the static size of the content never taking in consideration
         variable fields, for example, names.
 
         Returns:
             int: The size of the content, in bytes
         '''
-        if ntfs3:
-            return cls._TIMESTAMP_SIZE + cls._REPR.size
-        else:
-            return cls._TIMESTAMP_SIZE + cls._REPR_NO_NFTS_3_EXTENSION.size
+        return cls._TIMESTAMP_SIZE + cls._REPR.size
+
 
     @classmethod
     def create_from_binary(cls, binary_stream):
@@ -197,6 +213,9 @@ class StandardInformation(AttributeContent):
                 and self.security_id == other.security_id and self.quota_charged == other.quota_charged \
                 and self.usn == other.usn
         return False
+
+    def __len__(self):
+        return StandardInformation._TIMESTAMP_SIZE + StandardInformation._REPR.size
 
     def __repr__(self):
         'Return a nicely formatted representation string'
@@ -559,17 +578,24 @@ class VolumeInformation():
 #******************************************************************************
 # FILENAME ATTRIBUTE
 #******************************************************************************
-class FileName():
+class FileName(AttributeContent):
     '''Represents the FILE_NAME converting the timestamps to
     datetimes and the flags to FileInfoFlags representation.
+
+    It is important to note that windows apparently does not update the fields
+    "allocated size of file" and "real size of file". These should be calculated
+    using the data attributes for correct informaiton.
     '''
     #_REPR = struct.Struct("<7Q2I2B")
-    _REPR = struct.Struct("<5Q16x2I2B")
+    _TIMESTAMP_SIZE = Timestamps.get_representation_size() #TODO looks ugly... fix
+    _REPR = struct.Struct("<1Q32x2Q2I2B")
+    #_REPR = struct.Struct("<5Q16x2I2B")
     ''' File reference to parent directory - 8
-        Creation time - 8
-        File altered time - 8
-        MFT/Metadata altered time - 8
-        Accessed time - 8
+        TIMESTAMPS(32)
+            Creation time - 8
+            File altered time - 8
+            MFT/Metadata altered time - 8
+            Accessed time - 8
         Allocated size of file - 8 (multiple of the cluster size)
         Real size of file - 8 (actual file size, might also be stored by the directory)
         Flags - 4
@@ -578,7 +604,8 @@ class FileName():
         Name type - 1
         Name - variable
     '''
-    def __init__(self, content=(None, )*11):
+
+    def __init__(self, content=(None, )*10):
         '''Creates a FileName object. The content has to be an iterable
         with precisely 11 elements in order.
         If content is not provided, a tuple filled with 'None' is the default
@@ -588,22 +615,17 @@ class FileName():
             content (iterable), where:
                 [0] (int) - parent refence
                 [1] (int) - parent sequence
-                [2] (datetime) - created time
-                [3] (datetime) - changed time
-                [4] (datetime) - mft change time
-                [5] (datetime) - accessed
-                [7] (FileInfoFlags) - flags
-                [8] (int) - reparse value
-                [9] (int) - name length
-                [10] (NameType) - name type
-                [11] (str) - name
+                [2] (Timestamps) - timestampes
+                [3] (int) - allocated file size
+                [4] (int) - real file size
+                [5] (FileInfoFlags) - flags
+                [6] (int) - reparse value
+                [7] (int) - name length
+                [8] (NameType) - name type
+                [9] (str) - name
         '''
-        self.timestamps = {}
-
-        self.parent_ref, self.parent_seq, self.timestamps["created"], \
-        self.timestamps["changed"], self.timestamps["mft_change"], \
-        self.timestamps["accessed"], \
-        self.flags, self.reparse_value, _, self.name_type, \
+        self.parent_ref, self.parent_seq, self.timestamps, self.alloc_file_size, \
+        self.real_file_size, self.flags, self.reparse_value, _, self.name_type, \
         self.name = content
 
     def _get_name_len(self):
@@ -613,7 +635,8 @@ class FileName():
     name_len = property(_get_name_len, doc='Length of the name')
 
     @classmethod
-    def get_static_content_size(cls):
+    def get_representation_size(cls):
+    #def get_static_content_size(cls):
         '''Returns the static size of the content never taking in consideration
         variable fields, for example, names.
 
@@ -638,44 +661,155 @@ class FileName():
         nw_obj = cls()
         content = cls._REPR.unpack(binary_view[:cls._REPR.size])
         name = binary_view[cls._REPR.size:].tobytes().decode("utf_16_le")
-
+        timestamps = Timestamps.create_from_binary(binary_view[8:8+cls._TIMESTAMP_SIZE])
         file_ref, file_seq = get_file_reference(content[0])
-        nw_obj.parent_ref, nw_obj.parent_seq, nw_obj.timestamps["created"], \
-        nw_obj.timestamps["changed"], nw_obj.timestamps["mft_change"], \
-        nw_obj.timestamps["accessed"], nw_obj.flags, nw_obj.reparse_value, \
-        nw_obj.name_type, nw_obj.name = \
-        file_ref, file_seq, convert_filetime(content[1]), \
-        convert_filetime(content[2]), convert_filetime(content[3]), \
-        convert_filetime(content[4]), FileInfoFlags(content[5]), \
-        content[6], NameType(content[8]), name
+
+        nw_obj.parent_ref, nw_obj.parent_seq, nw_obj.timestamps, nw_obj.alloc_file_size, \
+        nw_obj.real_file_size, nw_obj.flags, nw_obj.reparse_value, nw_obj.name_type, \
+        nw_obj.name = \
+        file_ref, file_seq, timestamps, content[1], content[2], FileInfoFlags(content[3]),  \
+        content[4], NameType(content[6]), name
 
         return nw_obj
 
-    def get_created_time(self):
-        '''Return the created time. This function provides the same information
-        as using <variable>.timestamps["created"]'''
-        return self.timestamps["created"]
+    def __eq__(self, other):
+        if isinstance(other, FileName):
+            return self.parent_ref == other.parent_ref and self.parent_seq == other.parent_seq \
+                and self.timestamps == other.timestamps and self.alloc_file_size == other.alloc_file_size \
+                and self.real_file_size == other.real_file_size and self.flags == other.flags \
+                and self.reparse_value == other.reparse_value and self.name_type == other.name_type \
+                and self.name == other.name
+        return False
 
-    def get_changed_time(self):
-        '''Return the changed time. This function provides the same information
-        as using <variable>.timestamps["changed"]'''
-        return self.timestamps["changed"]
-
-    def get_mftchange_time(self):
-        '''Return the mft change time. This function provides the same information
-        as using <variable>.timestamps["mft_change"]'''
-        return self.timestamps["mft_change"]
-
-    def get_accessed_time(self):
-        '''Return the accessed time. This function provides the same information
-        as using <variable>.timestamps["accessed"]'''
-        return self.timestamps["accessed"]
+    def __len__(self):
+        return  FileName._REPR.size + name_len
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(parent_ref={}, parent_seq={}, timestamps={}, reparse_value={}, flags={!s}, name_len={}, name_type={!s}, name={})'.format(
-            self.parent_ref, self.parent_seq, self.timestamps, self.reparse_value,
-            self.flags, self.name_len, self.name_type, self.name)
+        return self.__class__.__name__ + '(parent_ref={}, parent_seq={}, timestamps={!s}, alloc_file_size={}, real_file_size={}, flags={!s}, reparse_value={}, name_len={}, name_type={!s}, name={})'.format(
+            self.parent_ref, self.parent_seq, self.timestamps, self.alloc_file_size, self.real_file_size, self.flags,
+            self.reparse_value, self.name_len, self.name_type, self.name)
+
+# #******************************************************************************
+# # FILENAME ATTRIBUTE
+# #******************************************************************************
+# class FileName():
+#     '''Represents the FILE_NAME converting the timestamps to
+#     datetimes and the flags to FileInfoFlags representation.
+#     '''
+#     #_REPR = struct.Struct("<7Q2I2B")
+#     _REPR = struct.Struct("<5Q16x2I2B")
+#     ''' File reference to parent directory - 8
+#         Creation time - 8
+#         File altered time - 8
+#         MFT/Metadata altered time - 8
+#         Accessed time - 8
+#         Allocated size of file - 8 (multiple of the cluster size)
+#         Real size of file - 8 (actual file size, might also be stored by the directory)
+#         Flags - 4
+#         Reparse value - 4
+#         Name length - 1 (in characters)
+#         Name type - 1
+#         Name - variable
+#     '''
+#     def __init__(self, content=(None, )*11):
+#         '''Creates a FileName object. The content has to be an iterable
+#         with precisely 11 elements in order.
+#         If content is not provided, a tuple filled with 'None' is the default
+#         argument.
+#
+#         Args:
+#             content (iterable), where:
+#                 [0] (int) - parent refence
+#                 [1] (int) - parent sequence
+#                 [2] (datetime) - created time
+#                 [3] (datetime) - changed time
+#                 [4] (datetime) - mft change time
+#                 [5] (datetime) - accessed
+#                 [7] (FileInfoFlags) - flags
+#                 [8] (int) - reparse value
+#                 [9] (int) - name length
+#                 [10] (NameType) - name type
+#                 [11] (str) - name
+#         '''
+#         self.timestamps = {}
+#
+#         self.parent_ref, self.parent_seq, self.timestamps["created"], \
+#         self.timestamps["changed"], self.timestamps["mft_change"], \
+#         self.timestamps["accessed"], \
+#         self.flags, self.reparse_value, _, self.name_type, \
+#         self.name = content
+#
+#     def _get_name_len(self):
+#         return len(self.name)
+#
+#     #the name length can derived from the name, so, we don't need to keep in memory
+#     name_len = property(_get_name_len, doc='Length of the name')
+#
+#     @classmethod
+#     def get_static_content_size(cls):
+#         '''Returns the static size of the content never taking in consideration
+#         variable fields, for example, names.
+#
+#         Returns:
+#             int: The size of the content, in bytes
+#         '''
+#         return cls._REPR.size
+#
+#     @classmethod
+#     def create_from_binary(cls, binary_view):
+#         '''Creates a new object FileName from a binary stream. The binary
+#         stream can be represented by a byte string, bytearray or a memoryview of the
+#         bytearray.
+#
+#         Args:
+#             binary_view (memoryview of bytearray) - A binary stream with the
+#                 information of an FileName
+#
+#         Returns:
+#             FileName: New object using the binary stream as source
+#         '''
+#         nw_obj = cls()
+#         content = cls._REPR.unpack(binary_view[:cls._REPR.size])
+#         name = binary_view[cls._REPR.size:].tobytes().decode("utf_16_le")
+#
+#         file_ref, file_seq = get_file_reference(content[0])
+#         nw_obj.parent_ref, nw_obj.parent_seq, nw_obj.timestamps["created"], \
+#         nw_obj.timestamps["changed"], nw_obj.timestamps["mft_change"], \
+#         nw_obj.timestamps["accessed"], nw_obj.flags, nw_obj.reparse_value, \
+#         nw_obj.name_type, nw_obj.name = \
+#         file_ref, file_seq, convert_filetime(content[1]), \
+#         convert_filetime(content[2]), convert_filetime(content[3]), \
+#         convert_filetime(content[4]), FileInfoFlags(content[5]), \
+#         content[6], NameType(content[8]), name
+#
+#         return nw_obj
+#
+#     def get_created_time(self):
+#         '''Return the created time. This function provides the same information
+#         as using <variable>.timestamps["created"]'''
+#         return self.timestamps["created"]
+#
+#     def get_changed_time(self):
+#         '''Return the changed time. This function provides the same information
+#         as using <variable>.timestamps["changed"]'''
+#         return self.timestamps["changed"]
+#
+#     def get_mftchange_time(self):
+#         '''Return the mft change time. This function provides the same information
+#         as using <variable>.timestamps["mft_change"]'''
+#         return self.timestamps["mft_change"]
+#
+#     def get_accessed_time(self):
+#         '''Return the accessed time. This function provides the same information
+#         as using <variable>.timestamps["accessed"]'''
+#         return self.timestamps["accessed"]
+#
+#     def __repr__(self):
+#         'Return a nicely formatted representation string'
+#         return self.__class__.__name__ + '(parent_ref={}, parent_seq={}, timestamps={}, reparse_value={}, flags={!s}, name_len={}, name_type={!s}, name={})'.format(
+#             self.parent_ref, self.parent_seq, self.timestamps, self.reparse_value,
+#             self.flags, self.name_len, self.name_type, self.name)
 
 #******************************************************************************
 # DATA ATTRIBUTE
