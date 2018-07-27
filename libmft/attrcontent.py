@@ -12,6 +12,7 @@ import struct
 import logging
 from itertools import chain as _chain
 from operator import getitem as _getitem
+from uuid import UUID
 from abc import ABCMeta, abstractmethod
 
 from libmft.util.functions import convert_filetime, get_file_reference
@@ -116,8 +117,7 @@ class Timestamps(AttributeContent):
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(created={}, changed={}, mft_changed={}, accessed={})'.format(
-            self.created, self.changed, self.mft_changed, self.accessed)
+        return self.__class__.__name__ + f'(created={self.created}, changed={self.changed}, mft_changed={self.mft_changed}, accessed={self.accessed})'
 
 #******************************************************************************
 # STANDARD_INFORMATION ATTRIBUTE
@@ -219,10 +219,11 @@ class StandardInformation(AttributeContent):
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(timestamps={!s}, flags={!s}, max_n_versions={}, version_number={}, class_id={}, owner_id={}, security_id={}, quota_charged={}, usn={})'.format(
-            self.timestamps, self.flags, self.max_n_versions, self.version_number,
-            self.class_id, self.owner_id,  self.security_id, self.quota_charged,
-            self.usn)
+        return self.__class__.__name__ + (f'(timestamps={repr(self.timestamps)},'
+            f'flags={str(self.flags)}, max_n_versions={self.max_n_versions},'
+            f'version_number={self.version_number}, class_id={self.class_id},'
+            f'owner_id={self.owner_id}, security_id={self.security_id},'
+            f'quota_charged={self.quota_charged}, usn={self.usn})')
 
 #******************************************************************************
 # ATTRIBUTE_LIST ATTRIBUTE
@@ -382,60 +383,7 @@ class AttributeList():
 #******************************************************************************
 # OBJECT_ID ATTRIBUTE
 #******************************************************************************
-class UID():
-    '''This class represents an UID as defined by Microsoft and used in the
-    MFT entries. Consult https://msdn.microsoft.com/en-us/library/cc227517.aspx
-    for information.'''
-    _REPR = struct.Struct("<2Q")
-    ''' Object ID - 8
-        Volume ID - 8
-    '''
-    def __init__(self, content=(None,)*2):
-        '''Creates an UID object. The content has to be an iterable
-        with precisely 2 elements in order.
-        If content is not provided, a 2 element tuple, where all elements are
-        None, is the default argument.
-
-        Args:
-            content (iterable), where:
-                [0] (int) - object id
-                [1] (int) - volume_id
-        '''
-        self.object_id, self.volume_id = content
-
-    @classmethod
-    def get_uid_size(cls):
-        '''Returns the static size of the content never taking in consideration
-        variable fields, for example, names.
-
-        Returns:
-            int: The size of the content, in bytes
-        '''
-        return cls._REPR.size
-
-    @classmethod
-    def create_from_binary(cls, binary_view):
-        '''Creates a new object UID from a binary stream. The binary
-        stream can be represented by a byte string, bytearray or a memoryview of the
-        bytearray.
-
-        Args:
-            binary_view (memoryview of bytearray) - A binary stream with the
-                information of an UID
-
-        Returns:
-            UID: New object using the binary stream as source
-        '''
-        return cls(cls._REPR.unpack(binary_view[:cls._REPR.size]))
-
-    #TODO comparison methods
-
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(volume_id={:#010x}, object_id={:#010x})'.format(
-            self.volume_id, self.object_id)
-
-class ObjectID():
+class ObjectID(AttributeContent):
     '''This class represents an Object ID.'''
 
     def __init__(self,  content=(None,)*4):
@@ -453,6 +401,15 @@ class ObjectID():
         '''
         self.object_id, self.birth_vol_id, self.birth_object_id, \
         self.birth_domain_id = content
+        self.__size = sum([16 for data in content if content is not None])
+
+    @classmethod
+    def get_representation_size(cls):
+        '''Get the representation size in bytes, based on defined struct'''
+        #The objectid, by definition, has no struct as it is but a potential
+        #sequence of guid (uuid), as such, calling representation_size for it
+        #is a logic failure
+        raise ContentError("ObjectID attribute has no defined struct")
 
     @classmethod
     def create_from_binary(cls, binary_view):
@@ -467,20 +424,29 @@ class ObjectID():
         Returns:
             ObjectID: New object using the binary stream as source
         '''
-        uid_size = UID.get_uid_size()
+        uid_size = 16
 
         #some entries might not have all four ids, this line forces
         #to always create 4 elements, so contruction is easier
-        uids = [UID.create_from_binary(binary_view[i*uid_size:(i+1)*uid_size]) if i * uid_size < len(binary_view) else None for i in range(0,4)]
+        uids = [UUID(bytes_le=binary_view[i*uid_size:(i+1)*uid_size].tobytes()) if i * uid_size < len(binary_view) else None for i in range(0,4)]
         _MOD_LOGGER.debug("ObjectID object created successfully")
 
         return cls(uids)
 
+    def __len__(self):
+        '''Get the actual size of the content, as some attributes have variable sizes'''
+        return self.__size
+
+    def __eq__(self, other):
+        if isinstance(other, ObjectID):
+            return self.object_id == other.object_id and self.birth_vol_id == other.birth_vol_id \
+                and self.birth_object_id == other.birth_object_id and self.birth_domain_id == other.birth_domain_id
+        return False
+
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(object_id={}, birth_vol_id={}, birth_object_id={}, birth_domain_id={})'.format(
-            self.object_id, self.birth_vol_id, self.birth_object_id, self.birth_domain_id)
-
+        return self.__class__.__name__ + f'(object_id={self.object_id}, birth_vol_id={self.birth_vol_id}, birth_object_id={self.birth_object_id}, birth_domain_id={self.birth_domain_id})'
+        
 #******************************************************************************
 # VOLUME_NAME ATTRIBUTE
 #******************************************************************************
@@ -689,127 +655,6 @@ class FileName(AttributeContent):
         return self.__class__.__name__ + '(parent_ref={}, parent_seq={}, timestamps={!s}, alloc_file_size={}, real_file_size={}, flags={!s}, reparse_value={}, name_len={}, name_type={!s}, name={})'.format(
             self.parent_ref, self.parent_seq, self.timestamps, self.alloc_file_size, self.real_file_size, self.flags,
             self.reparse_value, self.name_len, self.name_type, self.name)
-
-# #******************************************************************************
-# # FILENAME ATTRIBUTE
-# #******************************************************************************
-# class FileName():
-#     '''Represents the FILE_NAME converting the timestamps to
-#     datetimes and the flags to FileInfoFlags representation.
-#     '''
-#     #_REPR = struct.Struct("<7Q2I2B")
-#     _REPR = struct.Struct("<5Q16x2I2B")
-#     ''' File reference to parent directory - 8
-#         Creation time - 8
-#         File altered time - 8
-#         MFT/Metadata altered time - 8
-#         Accessed time - 8
-#         Allocated size of file - 8 (multiple of the cluster size)
-#         Real size of file - 8 (actual file size, might also be stored by the directory)
-#         Flags - 4
-#         Reparse value - 4
-#         Name length - 1 (in characters)
-#         Name type - 1
-#         Name - variable
-#     '''
-#     def __init__(self, content=(None, )*11):
-#         '''Creates a FileName object. The content has to be an iterable
-#         with precisely 11 elements in order.
-#         If content is not provided, a tuple filled with 'None' is the default
-#         argument.
-#
-#         Args:
-#             content (iterable), where:
-#                 [0] (int) - parent refence
-#                 [1] (int) - parent sequence
-#                 [2] (datetime) - created time
-#                 [3] (datetime) - changed time
-#                 [4] (datetime) - mft change time
-#                 [5] (datetime) - accessed
-#                 [7] (FileInfoFlags) - flags
-#                 [8] (int) - reparse value
-#                 [9] (int) - name length
-#                 [10] (NameType) - name type
-#                 [11] (str) - name
-#         '''
-#         self.timestamps = {}
-#
-#         self.parent_ref, self.parent_seq, self.timestamps["created"], \
-#         self.timestamps["changed"], self.timestamps["mft_change"], \
-#         self.timestamps["accessed"], \
-#         self.flags, self.reparse_value, _, self.name_type, \
-#         self.name = content
-#
-#     def _get_name_len(self):
-#         return len(self.name)
-#
-#     #the name length can derived from the name, so, we don't need to keep in memory
-#     name_len = property(_get_name_len, doc='Length of the name')
-#
-#     @classmethod
-#     def get_static_content_size(cls):
-#         '''Returns the static size of the content never taking in consideration
-#         variable fields, for example, names.
-#
-#         Returns:
-#             int: The size of the content, in bytes
-#         '''
-#         return cls._REPR.size
-#
-#     @classmethod
-#     def create_from_binary(cls, binary_view):
-#         '''Creates a new object FileName from a binary stream. The binary
-#         stream can be represented by a byte string, bytearray or a memoryview of the
-#         bytearray.
-#
-#         Args:
-#             binary_view (memoryview of bytearray) - A binary stream with the
-#                 information of an FileName
-#
-#         Returns:
-#             FileName: New object using the binary stream as source
-#         '''
-#         nw_obj = cls()
-#         content = cls._REPR.unpack(binary_view[:cls._REPR.size])
-#         name = binary_view[cls._REPR.size:].tobytes().decode("utf_16_le")
-#
-#         file_ref, file_seq = get_file_reference(content[0])
-#         nw_obj.parent_ref, nw_obj.parent_seq, nw_obj.timestamps["created"], \
-#         nw_obj.timestamps["changed"], nw_obj.timestamps["mft_change"], \
-#         nw_obj.timestamps["accessed"], nw_obj.flags, nw_obj.reparse_value, \
-#         nw_obj.name_type, nw_obj.name = \
-#         file_ref, file_seq, convert_filetime(content[1]), \
-#         convert_filetime(content[2]), convert_filetime(content[3]), \
-#         convert_filetime(content[4]), FileInfoFlags(content[5]), \
-#         content[6], NameType(content[8]), name
-#
-#         return nw_obj
-#
-#     def get_created_time(self):
-#         '''Return the created time. This function provides the same information
-#         as using <variable>.timestamps["created"]'''
-#         return self.timestamps["created"]
-#
-#     def get_changed_time(self):
-#         '''Return the changed time. This function provides the same information
-#         as using <variable>.timestamps["changed"]'''
-#         return self.timestamps["changed"]
-#
-#     def get_mftchange_time(self):
-#         '''Return the mft change time. This function provides the same information
-#         as using <variable>.timestamps["mft_change"]'''
-#         return self.timestamps["mft_change"]
-#
-#     def get_accessed_time(self):
-#         '''Return the accessed time. This function provides the same information
-#         as using <variable>.timestamps["accessed"]'''
-#         return self.timestamps["accessed"]
-#
-#     def __repr__(self):
-#         'Return a nicely formatted representation string'
-#         return self.__class__.__name__ + '(parent_ref={}, parent_seq={}, timestamps={}, reparse_value={}, flags={!s}, name_len={}, name_type={!s}, name={})'.format(
-#             self.parent_ref, self.parent_seq, self.timestamps, self.reparse_value,
-#             self.flags, self.name_len, self.name_type, self.name)
 
 #******************************************************************************
 # DATA ATTRIBUTE

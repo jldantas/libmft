@@ -40,13 +40,6 @@ All these particular observations and cases are documented here.
 
 Entries will not be loaded if they are empty (signature equals to "\x00\x00\x00\x00").
 
-#### Attributes
-
-- STANDARD_INFORMATION fields: Class ID, "version" and "max version" fields
-  - Nobody knows exactly what they are used for
-- FILE_NAME fields: Allocated Size, Real size
-  - It is not updated by windows, use the data fields to get the real size
-
 ### Multithread/multiprocessing
 
 I've tried to implement the loading of the file using multiple processes
@@ -68,7 +61,6 @@ P.S.: The implementation I used can be seen in the file parallel.py
 
 ## TODO/Roadmap?
 
-- Find a way of optimizing the datetime conversion (numpy datetime?)
 - Test with windows XP formatted disks (NTFS version < 3)
 
 ## Features
@@ -104,8 +96,10 @@ P.S.: The implementation I used can be seen in the file parallel.py
 ### Current CL
 
 - Added removed entries to the STANDARD_INFORMATION attribute
+- Added removed entries to the FILE_NAME attribute
 - Added abstract class for content
 - Moved timestamps to its own class
+- Removed UID implementation in favor of standard library on
 
 ### Version 0.7
 
