@@ -40,6 +40,10 @@ All these particular observations and cases are documented here.
 
 Entries will not be loaded if they are empty (signature equals to "\x00\x00\x00\x00").
 
+#### Attributes
+
+- First 8 bytes of the VOLUME_INFORMATION attribute
+
 ### Multithread/multiprocessing
 
 I've tried to implement the loading of the file using multiple processes

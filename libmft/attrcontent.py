@@ -446,11 +446,11 @@ class ObjectID(AttributeContent):
     def __repr__(self):
         'Return a nicely formatted representation string'
         return self.__class__.__name__ + f'(object_id={self.object_id}, birth_vol_id={self.birth_vol_id}, birth_object_id={self.birth_object_id}, birth_domain_id={self.birth_domain_id})'
-        
+
 #******************************************************************************
 # VOLUME_NAME ATTRIBUTE
 #******************************************************************************
-class VolumeName():
+class VolumeName(AttributeContent):
     '''This class represents a VolumeName attribute.'''
     def __init__(self, name):
         '''Initialize a VolumeName object, receives the name of the volume:
@@ -459,6 +459,14 @@ class VolumeName():
             name (str) - name of the volume
         '''
         self.name = name
+
+    @classmethod
+    def get_representation_size(cls):
+        '''Get the representation size in bytes, based on defined struct'''
+        #The objectid, by definition, has no struct as it is but a potential
+        #sequence of guid (uuid), as such, calling representation_size for it
+        #is a logic failure
+        raise ContentError("ObjectID attribute has no defined struct")
 
     @classmethod
     def create_from_binary(cls, binary_view):
@@ -482,18 +490,22 @@ class VolumeName():
         '''Returns the length of the name'''
         return len(self.name)
 
+    def __eq__(self, other):
+        if isinstance(other, VolumeName):
+            return self.name == other.name
+        return False
+
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(name={})'.format(
-            self.name)
+        return self.__class__.__name__ + f'(name={self.name})'
 
 #******************************************************************************
 # VOLUME_INFORMATION ATTRIBUTE
 #******************************************************************************
-class VolumeInformation():
+class VolumeInformation(AttributeContent):
     '''This class represents a VolumeInformation attribute.'''
 
-    _REPR = struct.Struct("<Q2BH")
+    _REPR = struct.Struct("<8x2BH")
     ''' Unknow - 8
         Major version number - 1
         Minor version number - 1
@@ -515,6 +527,11 @@ class VolumeInformation():
         self.major_ver, self.minor_ver, self.vol_flags = content
 
     @classmethod
+    def get_representation_size(cls):
+        '''Get the representation size in bytes, based on defined struct'''
+        return cls._REPR.size
+
+    @classmethod
     def create_from_binary(cls, binary_view):
         '''Creates a new object VolumeInformation from a binary stream. The binary
         stream can be represented by a byte string, bytearray or a memoryview of the
@@ -527,19 +544,27 @@ class VolumeInformation():
         Returns:
             VolumeInformation: New object using the binary stream as source
         '''
-        nw_obj = cls()
         content = cls._REPR.unpack(binary_view)
 
-        nw_obj.major_ver, nw_obj.minor_ver, nw_obj.vol_flags = content[1], \
-            content[2], VolumeFlags(content[3])
+        nw_obj = cls(content)
+        nw_obj.vol_flags = VolumeFlags(content[2])
         _MOD_LOGGER.debug("VolumeInformation object created successfully")
 
         return nw_obj
 
+    def __len__(self):
+        '''Returns the length of the attribute'''
+        return cls._REPR.size
+
+    def __eq__(self, other):
+        if isinstance(other, VolumeInformation):
+            return self.major_ver == other.major_ver and self.minor_ver == other.minor_ver \
+                    and self.vol_flags == other.vol_flags
+        return False
+
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(major_ver={}, minor_ver={}, vol_flags={!s})'.format(
-            self.major_ver, self.minor_ver, self.vol_flags)
+        return self.__class__.__name__ + f'(major_ver={self.major_ver}, minor_ver={self.minor_ver}, vol_flags={self.vol_flags})'
 
 #******************************************************************************
 # FILENAME ATTRIBUTE
