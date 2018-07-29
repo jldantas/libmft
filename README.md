@@ -44,6 +44,11 @@ Entries will not be loaded if they are empty (signature equals to "\x00\x00\x00\
 
 - First 8 bytes of the VOLUME_INFORMATION attribute
 
+### Interpretation of data
+
+- The EA attribute is not very well understood. There are some trailling stuff and
+  mystic alignments that are not confirmed. I'm using a value considering a 8 byte aligment
+
 ### Multithread/multiprocessing
 
 I've tried to implement the loading of the file using multiple processes
@@ -92,7 +97,7 @@ P.S.: The implementation I used can be seen in the file parallel.py
 - [x] BITMAP
 - [x] REPARSE_POINT
 - [x] EA_INFORMATION
-- [ ] EA
+- [x] EA
 - [ ] LOGGED_TOOL_STREAM
 
 ## CHANGELOG

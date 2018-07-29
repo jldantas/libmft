@@ -175,8 +175,8 @@ class Attribute():
                    AttrTypes.INDEX_ALLOCATION : FileName.create_from_binary,
                    AttrTypes.BITMAP : Bitmap,
                    AttrTypes.REPARSE_POINT : ReparsePoint.create_from_binary,
-                   AttrTypes.EA_INFORMATION : EaInformation,
-                   AttrTypes.EA : Ea,
+                   AttrTypes.EA_INFORMATION : EaInformation.create_from_binary,
+                   AttrTypes.EA : Ea.create_from_binary,
                    AttrTypes.LOGGED_TOOL_STREAM : LoggedToolStream,
     }
 

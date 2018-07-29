@@ -14,6 +14,7 @@ from itertools import chain as _chain
 from operator import getitem as _getitem
 from uuid import UUID
 from abc import ABCMeta, abstractmethod
+from math import ceil as _ceil
 
 from libmft.util.functions import convert_filetime, get_file_reference
 from libmft.flagsandtypes import AttrTypes, NameType, FileInfoFlags, \
@@ -31,17 +32,12 @@ _MOD_LOGGER = logging.getLogger(__name__)
 #******************************************************************************
 # ABSTRACT CLASS FOR ATTRIBUTE CONTENT
 #******************************************************************************
-class AttributeContent(metaclass=ABCMeta):
+class AttributeContentBase(metaclass=ABCMeta):
+    '''Base class for attributes.'''
     @classmethod
     @abstractmethod
     def create_from_binary(cls, binary_stream):
         '''Create the class from a binary stream'''
-        pass
-
-    @classmethod
-    @abstractmethod
-    def get_representation_size(cls):
-        '''Get the representation size in bytes, based on defined struct'''
         pass
 
     @abstractmethod
@@ -53,7 +49,22 @@ class AttributeContent(metaclass=ABCMeta):
     def __eq__(self, other):
         pass
 
-class Timestamps(AttributeContent):
+class AttributeContentNoRepr(AttributeContentBase):
+    pass
+
+class AttributeContentRepr(AttributeContentBase):
+    '''Most, if not all attributes have a representation in binary, this forces
+    a particular interface when using them'''
+    @classmethod
+    @abstractmethod
+    def get_representation_size(cls):
+        '''Get the representation size in bytes, based on defined struct'''
+        pass
+
+#******************************************************************************
+# TIMESTAMPS class
+#******************************************************************************
+class Timestamps(AttributeContentRepr):
     _REPR = struct.Struct("<4Q")
 
     def __init__(self, content=(None,)*4):
@@ -68,10 +79,17 @@ class Timestamps(AttributeContent):
         '''
         self.created, self.changed, self.mft_changed, self.accessed = content
 
-    def change_timezone(self, timezone):
-        #TODO implement this
-        pass
+    def astimezone(self, timezone):
+        if self.created.tzinfo is timezone:
+            return self
+        else:
+            nw_obj = cls((None,)*4)
+            nw_obj.created = self.created.astimezone(timezone)
+            nw_obj.changed = self.changed.astimezone(timezone)
+            nw_obj.mft_changed = self.mft_changed.astimezone(timezone)
+            nw_obj.accessed = self.accessed.astimezone(timezone)
 
+            return nw_obj
 
     @classmethod
     def get_representation_size(cls):
@@ -122,7 +140,7 @@ class Timestamps(AttributeContent):
 #******************************************************************************
 # STANDARD_INFORMATION ATTRIBUTE
 #******************************************************************************
-class StandardInformation(AttributeContent):
+class StandardInformation(AttributeContentRepr):
     '''Represents the STANDARD_INFORMATION converting the timestamps to
     datetimes and the flags to FileInfoFlags representation.'''
     _TIMESTAMP_SIZE = Timestamps.get_representation_size() #TODO looks ugly... fix
@@ -228,7 +246,7 @@ class StandardInformation(AttributeContent):
 #******************************************************************************
 # ATTRIBUTE_LIST ATTRIBUTE
 #******************************************************************************
-class AttributeListEntry():
+class AttributeListEntry(AttributeContentRepr):
     '''This class holds one entry on the attribute list attribute.'''
     _REPR = struct.Struct("<IH2B2QH")
     '''
@@ -260,7 +278,7 @@ class AttributeListEntry():
                 [7] (int) - attribute id
                 [8] (str) - name
         '''
-        self.attr_type, self.entry_len, _, self.name_offset, \
+        self.attr_type, self._entry_len, _, self.name_offset, \
         self.start_vcn, self.file_ref, self.file_seq, self.attr_id, self.name = content
 
     def _get_name_length(self):
@@ -271,13 +289,8 @@ class AttributeListEntry():
             return len(self.name)
 
     @classmethod
-    def get_static_content_size(cls):
-        '''Returns the static size of the content never taking in consideration
-        variable fields, for example, names.
-
-        Returns:
-            int: The size of the content, in bytes
-        '''
+    def get_representation_size(cls):
+        '''Get the representation size in bytes, based on defined struct'''
         return cls._REPR.size
 
     @classmethod
@@ -302,7 +315,7 @@ class AttributeListEntry():
         else:
             name = None
         file_ref, file_seq = get_file_reference(content[5])
-        nw_obj.attr_type, nw_obj.entry_len, nw_obj.name_offset, nw_obj.start_vcn,  \
+        nw_obj.attr_type, nw_obj._entry_len, nw_obj.name_offset, nw_obj.start_vcn,  \
         nw_obj.file_ref, nw_obj.file_seq, nw_obj.attr_id, nw_obj.name = \
         AttrTypes(content[0]), content[1], content[3], content[4], \
         file_ref, file_seq, content[6], name
@@ -315,15 +328,22 @@ class AttributeListEntry():
 
     def __len__(self):
         '''Returns the size of the entry, in bytes'''
-        return self.entry_len
+        return self._entry_len
+
+    def __eq__(self, other):
+        if isinstance(other, AttributeListEntry):
+            return self.attr_type == other.attr_type and self.entry_len == other.entry_len \
+                and self.name_len == other.name_len and self.name_offset == other.name_offset \
+                and self.start_vcn == other.start_vcn and self.file_ref == other.file_ref \
+                and self.file_seq == other.file_seq and self.attr_id == other.attr_id \
+                and self.name == other.name
+        return False
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(attr_type={!s}, entry_len={}, name_len={}, name_offset={}, start_vcn={}, file_ref={}, file_seq={}, attr_id={}, name={})'.format(
-            self.attr_type, self.entry_len, self.name_len, self.name_offset,
-            self.start_vcn, self.file_ref, self.file_seq, self.attr_id, self.name)
+        return self.__class__.__name__ + f'(attr_type={self.attr_type}, entry_len={self._entry_len}, name_len={self.name_len}, name_offset={self.name_offset}, start_vcn={self.start_vcn}, file_ref={self.file_ref}, file_seq={self.file_seq}, attr_id={self.attr_id}, name={self.name})'
 
-class AttributeList():
+class AttributeList(AttributeContentNoRepr):
     '''Represents the ATTRIBUTE_LIST attribute, holding all the entries, if available,
     as AttributeListEntry objects.'''
 
@@ -353,7 +373,7 @@ class AttributeList():
         while True:
             _MOD_LOGGER.debug("Creating AttributeListEntry object from binary stream...")
             entry = AttributeListEntry.create_from_binary(binary_view[offset:])
-            offset += entry.entry_len
+            offset += len(entry)
             attr_list.append(entry)
             if offset >= len(binary_view):
                 break
@@ -375,15 +395,19 @@ class AttributeList():
         '''Return the AttributeListEntry at the specified position'''
         return _getitem(self.attr_list, index)
 
+    def __eq__(self, other):
+        if isinstance(other, AttributeList):
+            return self.attr_list == other.attr_list
+        return False
+
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(attr_list={})'.format(
-            self.attr_list)
+        return self.__class__.__name__ + f'(attr_list={self.attr_list})'
 
 #******************************************************************************
 # OBJECT_ID ATTRIBUTE
 #******************************************************************************
-class ObjectID(AttributeContent):
+class ObjectID(AttributeContentNoRepr):
     '''This class represents an Object ID.'''
 
     def __init__(self,  content=(None,)*4):
@@ -402,14 +426,6 @@ class ObjectID(AttributeContent):
         self.object_id, self.birth_vol_id, self.birth_object_id, \
         self.birth_domain_id = content
         self.__size = sum([16 for data in content if content is not None])
-
-    @classmethod
-    def get_representation_size(cls):
-        '''Get the representation size in bytes, based on defined struct'''
-        #The objectid, by definition, has no struct as it is but a potential
-        #sequence of guid (uuid), as such, calling representation_size for it
-        #is a logic failure
-        raise ContentError("ObjectID attribute has no defined struct")
 
     @classmethod
     def create_from_binary(cls, binary_view):
@@ -450,7 +466,7 @@ class ObjectID(AttributeContent):
 #******************************************************************************
 # VOLUME_NAME ATTRIBUTE
 #******************************************************************************
-class VolumeName(AttributeContent):
+class VolumeName(AttributeContentNoRepr):
     '''This class represents a VolumeName attribute.'''
     def __init__(self, name):
         '''Initialize a VolumeName object, receives the name of the volume:
@@ -459,14 +475,6 @@ class VolumeName(AttributeContent):
             name (str) - name of the volume
         '''
         self.name = name
-
-    @classmethod
-    def get_representation_size(cls):
-        '''Get the representation size in bytes, based on defined struct'''
-        #The objectid, by definition, has no struct as it is but a potential
-        #sequence of guid (uuid), as such, calling representation_size for it
-        #is a logic failure
-        raise ContentError("ObjectID attribute has no defined struct")
 
     @classmethod
     def create_from_binary(cls, binary_view):
@@ -502,7 +510,7 @@ class VolumeName(AttributeContent):
 #******************************************************************************
 # VOLUME_INFORMATION ATTRIBUTE
 #******************************************************************************
-class VolumeInformation(AttributeContent):
+class VolumeInformation(AttributeContentRepr):
     '''This class represents a VolumeInformation attribute.'''
 
     _REPR = struct.Struct("<8x2BH")
@@ -569,7 +577,7 @@ class VolumeInformation(AttributeContent):
 #******************************************************************************
 # FILENAME ATTRIBUTE
 #******************************************************************************
-class FileName(AttributeContent):
+class FileName(AttributeContentRepr):
     '''Represents the FILE_NAME converting the timestamps to
     datetimes and the flags to FileInfoFlags representation.
 
@@ -684,7 +692,7 @@ class FileName(AttributeContent):
 #******************************************************************************
 # DATA ATTRIBUTE
 #******************************************************************************
-class Data():
+class Data(AttributeContentNoRepr):
     '''This is a placeholder class to the data attribute. By itself, it does
     very little and holds almost no information. If the data is resident, holds the
     content and the size.
@@ -695,14 +703,23 @@ class Data():
         '''
         self.content = bin_view.tobytes()
 
+    @classmethod
+    def create_from_binary(cls, binary_stream):
+        '''Create the class from a binary stream'''
+        return cls(binary_stream)
+
     def __len__(self):
         '''Returns the logical size of the file'''
         return len(self.content)
 
+    def __eq__(self, other):
+        if isinstance(other, Data):
+            return self.content == other.content
+        return False
+
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(content={})'.format(
-            self.content)
+        return self.__class__.__name__ + f'(content={self.content})'
 
 #******************************************************************************
 # INDEX_ROOT ATTRIBUTE
@@ -942,18 +959,49 @@ class IndexRoot():
 #******************************************************************************
 # BITMAP ATTRIBUTE
 #******************************************************************************
-class Bitmap():
+class Bitmap(AttributeContentNoRepr):
     '''Represents the bitmap attribute'''
     def __init__(self, bitmap_view):
         self._bitmap = bitmap_view.tobytes()
 
-    #TODO write a function to allow query if a particular entry is allocated
-    #TODO write a function to show all the allocated entries
+    def allocated_entries(self):
+        '''Returs a generator that provides all the allocated entries
+        for the bitmap'''
+        for entry_number in range(len(self._bitmap) * 8):
+            if self.entry_allocated(entry_number):
+                yield entry_number
+
+    def entry_allocated(self, entry_number):
+        '''Check if an entry is allocated'''
+        index, offset = divmod(entry_number, 8)
+        return bool(self._bitmap[index] & (1 << offset))
+
+    def get_next_empty(self):
+        '''Returns the next empty entry'''
+        #TODO probably not the best way, redo
+        for i, byte in enumerate(self._bitmap):
+            if byte != 255:
+                for offset in range(8):
+                    if not byte & (1 << offset):
+                        return (i * 8) + offset
+
+    @classmethod
+    def create_from_binary(cls, binary_stream):
+        '''Create the class from a binary stream'''
+        return cls(binary_stream)
+
+    def __len__(self):
+        '''Returns the size of the bitmap in bytes'''
+        return len(self._bitmap)
+
+    def __eq__(self, other):
+        if isinstance(other, Bitmap):
+            return self._bitmap == other._bitmap
+        return False
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(bitmap={})'.format(
-            self._bitmap)
+        return self.__class__.__name__ + f'(bitmap={self._bitmap})'
 
 #******************************************************************************
 # REPARSE_POINT ATTRIBUTE
@@ -1072,32 +1120,162 @@ class ReparsePoint():
 #******************************************************************************
 # EA_INFORMATION ATTRIBUTE
 #******************************************************************************
-class EaInformation():
+class EaInformation(AttributeContentRepr):
     _REPR = struct.Struct("<2HI")
     ''' Size of Extended Attribute entry - 2
         Number of Extended Attributes which have NEED_EA set - 2
         Size of extended attribute data - 4
     '''
-    def __init__(self, point_view):
-        self.entry_len, self.ea_set_number, self.ea_size = \
-            EaInformation._REPR.unpack(point_view[:EaInformation._REPR.size])
+    # def __init__(self, point_view):
+    #     self.entry_len, self.ea_set_number, self.ea_size = \
+    #         EaInformation._REPR.unpack(point_view[:EaInformation._REPR.size])
+
+    def __init__(self, content=(None,)*3):
+        self.entry_len, self.ea_set_number, self.ea_size = content
+
+    @classmethod
+    def get_representation_size(cls):
+        '''Get the representation size in bytes, based on defined struct'''
+        return cls._REPR.size
+
+    @classmethod
+    def create_from_binary(cls, binary_stream):
+        '''Create the class from a binary stream'''
+        return cls(cls._REPR.unpack(binary_stream[:cls._REPR.size]))
+
+    def __len__(self):
+        '''Returns the logical size of the file'''
+        return cls._REPR.size
+
+    def __eq__(self, other):
+        if isinstance(other, EaInformation):
+            return self.entry_len == other.entry_len and self.ea_set_number == other.ea_set_number \
+                and self.ea_size == other.ea_size
+        return False
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(entry_len={}, ea_set_number={}, ea_size={})'.format(
-            self.entry_len, self.ea_set_number, self.ea_size)
+        return self.__class__.__name__ + f'(entry_len={self.entry_len}, ea_set_number={self.ea_set_number}, ea_size={self.ea_size})'
 
 #******************************************************************************
 # EA ATTRIBUTE
 #******************************************************************************
-#TODO implement EA attribute
-class Ea():
-    def __init__(self, bin_view):
-        pass
+class EaEntry(AttributeContentRepr):
+    _REPR = struct.Struct("<I2BH")
+    ''' Offset to the next EA  - 4
+        Flags - 1
+        Name length - 1
+        Value length - 2
+    '''
+
+    def __init__(self, content=(None,)*4):
+        '''Creates a EaEntry object. The content has to be an iterable
+        with precisely 6 elements in order.
+        If content is not provided, a 6 element tuple, where all elements are
+        None, is the default argument
+
+        Args:
+            content (iterable), where:
+                [0] (int) - Offset to the next EA
+                [1] (int) - Flags
+                [2] (str) - name
+                [3] (bytes) - value
+        '''
+        self.offset_next_ea, self.flags, self.name, self.value = content
+
+    def _get_name_len(self):
+        return len(self.name)
+
+    def _get_value_len(self):
+        return len(self.value)
+
+    #the name length can derived from the name, so, we don't need to keep in memory
+    name_len = property(_get_name_len, doc='Length of the name')
+    value_len = property(_get_value_len, doc='Length of the value')
+
+    @classmethod
+    def get_representation_size(cls):
+        '''Get the representation size in bytes, based on defined struct'''
+        return cls._REPR.size
+
+    @classmethod
+    def create_from_binary(cls, binary_stream):
+        '''Create the class from a binary stream'''
+        content = cls._REPR.unpack(binary_stream[:cls._REPR.size])
+        nw_obj = cls()
+
+        _MOD_LOGGER.debug(f"Creating EaEntry from binary '{binary_stream.tobytes()}'...")
+        name = binary_stream[cls._REPR.size:cls._REPR.size + content[2]].tobytes().decode("ascii")
+        #it looks like the value is 8 byte aligned, do some math to compensate
+        #TODO confirm if this is true
+        value_alignment = (_ceil((cls._REPR.size + content[2]) / 8) * 8)
+        value = binary_stream[value_alignment:value_alignment + content[3]].tobytes()
+        #value = binary_stream[cls._REPR.size + content[2]:cls._REPR.size + content[2] + content[3]].tobytes()
+
+        nw_obj.offset_next_ea, nw_obj.flags, nw_obj.name, nw_obj.value = \
+            content[0], content[1], name, value
+
+        _MOD_LOGGER.debug(f"New EaEntry {repr(nw_obj)}")
+
+        return nw_obj
+
+    def __len__(self):
+        '''Returns the size of the entry'''
+        return self.offset_next_ea
+
+    def __eq__(self, other):
+        if isinstance(other, EaEntry):
+            return self.offset_next_ea == other.offset_next_ea and self.flags == other.flags \
+                and self.name == other.name and self.value == other.value
+        return False
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + "()"
+        return self.__class__.__name__ + f'(offset_next_ea={self.offset_next_ea}, flags={self.flags}, name={self.name}, value={self.value}, name_len={self.name_len}, value_len={self.value_len})'
+
+class Ea(AttributeContentNoRepr):
+    def __init__(self, content):
+        self.ea_list = content
+
+    @classmethod
+    def create_from_binary(cls, binary_stream):
+        '''Create the class from a binary stream'''
+        ea_list = []
+        offset = 0
+
+        _MOD_LOGGER.debug(f"Creating Ea object from binary stream {binary_stream.tobytes()}...")
+        while True:
+            entry = EaEntry.create_from_binary(binary_stream[offset:])
+            offset += len(entry)
+            ea_list.append(entry)
+            if offset >= len(binary_stream):
+                break
+            _MOD_LOGGER.debug(f"Next EaEntry offset = {offset}")
+        _MOD_LOGGER.debug(f"Ea object created successfully. {ea_list}")
+
+        return cls(ea_list)
+
+    def __iter__(self):
+        '''Return the iterator for the representation of the list, so it is
+        easier to check everything'''
+        return iter(self.ea_list)
+
+    def __getitem__(self, index):
+        '''Return the AttributeListEntry at the specified position'''
+        return _getitem(self.ea_list, index)
+
+    def __len__(self):
+        '''Returns the logical size of the file'''
+        return len(self.ea_list)
+
+    def __eq__(self, other):
+        if isinstance(other, Ea):
+            return self.ea_list == other.ea_list
+        return False
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return self.__class__.__name__ + f"(ea_list={self.ea_list})"
 
 #******************************************************************************
 # SECURITY_DESCRIPTOR ATTRIBUTE
