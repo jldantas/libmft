@@ -725,7 +725,7 @@ class Data(AttributeContentNoRepr):
 #******************************************************************************
 # INDEX_ROOT ATTRIBUTE
 #******************************************************************************
-class IndexNodeHeader():
+class IndexNodeHeader(AttributeContentRepr):
     '''Represents the Index Node Header, that is always present in the INDEX_ROOT
     and INDEX_ALLOCATION attribute.'''
 
@@ -753,7 +753,7 @@ class IndexNodeHeader():
         self.flags = content
 
     @classmethod
-    def get_static_content_size(cls):
+    def get_representation_size(cls):
         '''Returns the static size of the content never taking in consideration
         variable fields, for example, names.
 
@@ -780,12 +780,23 @@ class IndexNodeHeader():
 
         return nw_obj
 
+    def __len__(self):
+        '''Get the actual size of the content, as some attributes have variable sizes'''
+        return cls._REPR.size
+
+    def __eq__(self, other):
+        if isinstance(other, IndexNodeHeader):
+            return self.start_offset == other.start_offset \
+                and self.end_offset == other.end_offset \
+                and self.end_alloc_offset == other.end_alloc_offset \
+                and self.flags == other.flags
+        return False
+
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(start_offset={}, end_offset={}, end_alloc_offset={}, flags={})'.format(
-            self.start_offset, self.end_offset, self.end_alloc_offset, self.flags)
+        return self.__class__.__name__ + f'(start_offset={self.start_offset}, end_offset={self.end_offset}, end_alloc_offset={self.end_alloc_offset}, flags={self.flags})'
 
-class IndexEntry():
+class IndexEntry(AttributeContentRepr):
     '''Represents an entry in the index.'''
 
     _REPR = struct.Struct("<Q2HI")
@@ -821,7 +832,7 @@ class IndexEntry():
         self.content, self.vcn_child_node = content
 
     @classmethod
-    def get_static_content_size(cls):
+    def get_representation_size(cls):
         '''Returns the static size of the content never taking in consideration
         variable fields, for example, names.
 
@@ -854,7 +865,7 @@ class IndexEntry():
             binary_content = FileName.create_from_binary(binary_view[repr_size:repr_size+content[2]])
         else:
             binary_content = binary_view[repr_size:repr_size+content[2]].tobytes()
-        #if there is a next entry, we need to padd it to a 8 byte boundary
+        #if there is a next entry, we need to pad it to a 8 byte boundary
         if content[3] & IndexEntryFlags.CHILD_NODE_EXISTS:
             temp_size = repr_size + content[2]
             boundary_fix = (content[1] - temp_size) % 8
@@ -867,13 +878,26 @@ class IndexEntry():
 
         return nw_obj
 
+    def __len__(self):
+        '''Get the actual size of the content, as some attributes have variable sizes'''
+        return self.entry_len
+
+    def __eq__(self, other):
+        if isinstance(other, IndexEntry):
+            return self.generic == other.generic \
+                and self.entry_len == other.entry_len \
+                and self.content_len == other.content_len \
+                and self.flags == other.flags and self.content == other.content \
+                and self.vcn_child_node == other.vcn_child_node
+        return False
+
     def __repr__(self):
         'Return a nicely formatted representation string'
         return self.__class__.__name__ + '(generic={}, entry_len={}, content_len={}, flags={!s}, content={}, vcn_child_node={})'.format(
             self.generic, self.entry_len, self.content_len, self.flags,
             self.content, self.vcn_child_node)
 
-class IndexRoot():
+class IndexRoot(AttributeContentRepr):
     '''Represents the INDEX_ROOT'''
 
     _REPR = struct.Struct("<3IB3x")
@@ -906,7 +930,7 @@ class IndexRoot():
         self.index_entry_list = idx_entry_list
 
     @classmethod
-    def get_static_content_size(cls):
+    def get_representation_size(cls):
         '''Returns the static size of the content never taking in consideration
         variable fields, for example, names.
 
@@ -950,6 +974,19 @@ class IndexRoot():
             content[2], content[3]
 
         return nw_obj
+
+    def __len__(self):
+        '''Get the actual size of the content, as some attributes have variable sizes'''
+        return self.cls._REPR.size
+
+    def __eq__(self, other):
+        if isinstance(other, IndexRoot):
+            return self.attr_type == other.attr_type \
+                and self.collation_rule == other.collation_rule \
+                and self.index_len_in_bytes == other.index_len_in_bytes \
+                and self.index_len_in_cluster == other.index_len_in_cluster and self.node_header == other.node_header \
+                and self.index_entry_list == other.index_entry_list
+        return False
 
     def __repr__(self):
         'Return a nicely formatted representation string'
@@ -1606,7 +1643,6 @@ class ACL(AttributeContentRepr):
         'Return a nicely formatted representation string'
         return self.__class__.__name__ + f'(revision_number={self.revision_number}, size={self.size}, aces_len={self.aces_len}, aces={self.aces})'
 
-
 class SecurityDescriptor(AttributeContentNoRepr):
     def __init__(self, content=(None,)*5):
         self.header, self.owner_sid, self.group_sid, self.sacl, self.dacl = content
@@ -1648,7 +1684,6 @@ class SecurityDescriptor(AttributeContentNoRepr):
     def __repr__(self):
         'Return a nicely formatted representation string'
         return self.__class__.__name__ + f"(header={self.header}, owner_sid={str(self.owner_sid)}, group_sid={str(self.group_sid)}, sacl={str(self.sacl)}, dacl={str(self.dacl)})"
-
 
 #******************************************************************************
 # LOGGED_TOOL_STREAM ATTRIBUTE
