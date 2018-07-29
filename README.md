@@ -29,10 +29,7 @@ the `recipes.py`
 Apparently, Microsoft has some mystic rules related to how maintain the MFT records.
 
 Because of that, some things don't make sense when parsing the MFT and some others
-are unknown to the community. As such, this information can be "safely" ignored.
-This way we can speed up the processing and decrease the memory footprint.
-
-All these particular observations and cases are documented here.
+are unknown to the community.
 
 ### Data not parsed
 
@@ -48,6 +45,9 @@ Entries will not be loaded if they are empty (signature equals to "\x00\x00\x00\
 
 - The EA attribute is not very well understood. There are some trailling stuff and
   mystic alignments that are not confirmed. I'm using a value considering a 8 byte aligment
+- The SECURITY_DESCRIPTOR attribute has no implementation of the ACCESS_MASK  object specific
+  entries
+- The ObjectACE structure needs testing
 
 ### Multithread/multiprocessing
 
@@ -88,7 +88,7 @@ P.S.: The implementation I used can be seen in the file parallel.py
 - [x] ATTRIBUTE_LIST
 - [x] FILE_NAME
 - [x] OBJECT_ID
-- [ ] SECURITY_DESCRIPTOR
+- [x] SECURITY_DESCRIPTOR
 - [x] VOLUME_NAME
 - [x] VOLUME_INFORMATION
 - [x] DATA
@@ -108,7 +108,8 @@ P.S.: The implementation I used can be seen in the file parallel.py
 - Added removed entries to the FILE_NAME attribute
 - Added abstract class for content
 - Moved timestamps to its own class
-- Removed UID implementation in favor of standard library on
+- Removed UID implementation in favor of standard library one
+- Added EA and SECURITY_DESCRIPTOR attributes
 
 ### Version 0.7
 

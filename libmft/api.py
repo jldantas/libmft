@@ -167,7 +167,7 @@ class Attribute():
                    AttrTypes.ATTRIBUTE_LIST : AttributeList.create_from_binary,
                    AttrTypes.FILE_NAME : FileName.create_from_binary,
                    AttrTypes.OBJECT_ID : ObjectID.create_from_binary,
-                   AttrTypes.SECURITY_DESCRIPTOR : SecurityDescriptor,
+                   AttrTypes.SECURITY_DESCRIPTOR : SecurityDescriptor.create_from_binary,
                    AttrTypes.VOLUME_NAME : VolumeName.create_from_binary,
                    AttrTypes.VOLUME_INFORMATION : VolumeInformation.create_from_binary,
                    AttrTypes.DATA : Data,

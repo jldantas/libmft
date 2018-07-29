@@ -18,7 +18,8 @@ from math import ceil as _ceil
 
 from libmft.util.functions import convert_filetime, get_file_reference
 from libmft.flagsandtypes import AttrTypes, NameType, FileInfoFlags, \
-    IndexEntryFlags, VolumeFlags, ReparseType, ReparseFlags, CollationRule
+    IndexEntryFlags, VolumeFlags, ReparseType, ReparseFlags, CollationRule, \
+    SecurityDescriptorFlags, ACEType, ACEControlFlags, ACEAccessFlags
 from libmft.exceptions import ContentError
 
 _MOD_LOGGER = logging.getLogger(__name__)
@@ -1280,14 +1281,373 @@ class Ea(AttributeContentNoRepr):
 #******************************************************************************
 # SECURITY_DESCRIPTOR ATTRIBUTE
 #******************************************************************************
-#TODO implement SECURITY_DESCRIPTOR attribute
-class SecurityDescriptor():
-    def __init__(self, bin_view):
-        pass
+class SecurityDescriptorHeader(AttributeContentRepr):
+    _REPR = struct.Struct("<B1xH4I")
+    ''' Revision number - 1
+        Padding - 1
+        Control flags - 2
+        Reference to the owner SID - 4 (offset relative to the header)
+        Reference to the group SID - 4 (offset relative to the header)
+        Reference to the DACL - 4 (offset relative to the header)
+        Reference to the SACL - 4 (offset relative to the header)
+    '''
+
+    def __init__(self, content=(None,)*6):
+        self.revision_number, self.control_flags, self.owner_sid_offset,\
+        self.group_sid_offset, self.dacl_offset, self.sacl_offset = content
+
+    @classmethod
+    def get_representation_size(cls):
+        '''Get the representation size in bytes, based on defined struct'''
+        return cls._REPR.size
+
+    @classmethod
+    def create_from_binary(cls, binary_stream):
+        '''Create the class from a binary stream'''
+        nw_obj = cls(cls._REPR.unpack(binary_stream))
+        nw_obj.control_flags = SecurityDescriptorFlags(nw_obj.control_flags)
+
+        return nw_obj
+
+    def __len__(self):
+        '''Returns the logical size of the file'''
+        return cls._REPR.size
+
+    def __eq__(self, other):
+        if isinstance(other, SecurityDescriptorHeader):
+            return self.revision_number == other.revision_number \
+                and self.control_flags == other.control_flags \
+                and self.owner_sid_offset == other.owner_sid_offset and self.group_sid_offset == other.group_sid_offset \
+                and self.dacl_offset == other.dacl_offset and self.sacl_offset == other.sacl_offset
+        return False
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + "()"
+        return self.__class__.__name__ + f'(revision_number={self.revision_number}, control_flags={str(self.control_flags)}, owner_sid_offset={self.owner_sid_offset}, group_sid_offset={self.group_sid_offset}, dacl_offset={self.dacl_offset}, sacl_offset={self.sacl_offset})'
+
+class ACEHeader(AttributeContentRepr):
+    _REPR = struct.Struct("<2BH")
+    ''' ACE Type - 1
+        ACE Control flags - 1
+        Size - 2 (includes header size)
+    '''
+
+    def __init__(self, content=(None,)*3):
+        self.type, self.control_flags, self.ace_size = content
+
+    @classmethod
+    def get_representation_size(cls):
+        '''Get the representation size in bytes, based on defined struct'''
+        return cls._REPR.size
+
+    @classmethod
+    def create_from_binary(cls, binary_stream):
+        '''Create the class from a binary stream'''
+        nw_obj = cls()
+        content = cls._REPR.unpack(binary_stream)
+
+        nw_obj.type, nw_obj.control_flags, nw_obj.ace_size, = ACEType(content[0]), \
+            ACEControlFlags(content[1]), content[2]
+
+        return nw_obj
+
+    def __len__(self):
+        '''Returns the logical size of the file'''
+        return cls._REPR.size
+
+    def __eq__(self, other):
+        if isinstance(other, ACEHeader):
+            return self.type == other.type \
+                and self.control_flags == other.control_flags \
+                and self.ace_size == other.ace_size
+        return False
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return self.__class__.__name__ + f'(type={self.type}, control_flags={str(self.control_flags)}, ace_size={str(self.ace_size)})'
+
+class SID(AttributeContentRepr):
+    _REPR = struct.Struct("<2B6s")
+    ''' Revision number - 1
+        Number of sub authorities - 1
+        Authority - 6
+        Array of 32 bits with sub authorities - 4 * number of sub authorities
+    '''
+
+    def __init__(self, content=(None,)*3, sub_authorities=None):
+        self.revision_number, _, self.authority = content
+        self.sub_authorities = sub_authorities
+
+    def _get_sub_authority_len(self):
+        return len(self.sub_authorities)
+
+    #the name length can derived from the name, so, we don't need to keep in memory
+    sub_auth_len = property(_get_sub_authority_len, doc='Quantity of sub authorities')
+
+    @classmethod
+    def get_representation_size(cls):
+        '''Get the representation size in bytes, based on defined struct'''
+        return cls._REPR.size
+
+    @classmethod
+    def create_from_binary(cls, binary_stream):
+        '''Create the class from a binary stream'''
+        content = cls._REPR.unpack(binary_stream[:cls._REPR.size])
+        if content[1]:
+            sub_auth_repr = struct.Struct("<" + str(content[1]) + "I")
+            sub_auth = sub_auth_repr.unpack(binary_stream[cls._REPR.size:cls._REPR.size + sub_auth_repr.size])
+        else:
+            sub_auth = ()
+
+        nw_obj = cls(content, sub_auth)
+        nw_obj.authority = int.from_bytes(content[2], byteorder="big")
+
+        return nw_obj
+
+    def __len__(self):
+        '''Returns the size of the SID in bytes'''
+        return SID._REPR.size + (4 * sub_auth_len)
+
+    def __eq__(self, other):
+        if isinstance(other, SID):
+            return self.revision_number == other.revision_number \
+                and self.authority == other.authority \
+                and self.sub_authorities == other.sub_authorities
+        return False
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return self.__class__.__name__ + f'(revision_number={self.revision_number}, sub_auth_len={self.sub_auth_len}, authority={self.authority}, sub_authorities={self.sub_authorities})'
+
+    def __str__(self):
+        'Return a nicely formatted representation string'
+        sub_auths = "-".join([str(sub) for sub in self.sub_authorities])
+        return f'S-{self.revision_number}-{self.authority}-{sub_auths}'
+
+class BasicACE(AttributeContentRepr):
+    _REPR = struct.Struct("<I")
+    ''' Access rights flags - 4
+        SID - n
+    '''
+
+    def __init__(self, content=(None,)*2):
+        self.access_rights_flags, self.sid = content
+
+    @classmethod
+    def get_representation_size(cls):
+        '''Get the representation size in bytes, based on defined struct'''
+        return cls._REPR.size
+
+    @classmethod
+    def create_from_binary(cls, binary_stream):
+        '''Create the class from a binary stream'''
+        access_flags = cls._REPR.unpack(binary_stream[:cls._REPR.size])[0]
+        sid = SID.create_from_binary(binary_stream[cls._REPR.size:])
+
+        nw_obj = cls((ACEAccessFlags(access_flags), sid))
+
+        return nw_obj
+
+    def __len__(self):
+        '''Returns the logical size of the file'''
+        return cls._REPR.size
+
+    def __eq__(self, other):
+        if isinstance(other, BasicACE):
+            return self.access_rights_flags == other.access_rights_flags \
+                and self.sid == other.sid
+        return False
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return self.__class__.__name__ + f'(access_rights_flags={str(self.access_rights_flags)}, sid={str(self.sid)})'
+
+class ObjectACE(AttributeContentRepr):
+    _REPR = struct.Struct("<2I16s16s")
+    ''' Access rights flags - 4
+        Flags - 4
+        Object type class identifier (GUID) - 16
+        Inherited object type class identifier (GUID) - 16
+        SID - n
+    '''
+
+    def __init__(self, content=(None,)*5):
+        self.access_rights_flags, self.flags, self.object_guid,
+        self.inherited_guid, self.sid = content
+
+    @classmethod
+    def get_representation_size(cls):
+        '''Get the representation size in bytes, based on defined struct'''
+        return cls._REPR.size
+
+    @classmethod
+    def create_from_binary(cls, binary_stream):
+        '''Create the class from a binary stream'''
+        content = cls._REPR.unpack(binary_stream[cls._HEADER_SIZE:cls._HEADER_SIZE + cls._REPR.size])
+        sid = SID.create_from_binary(binary_stream[cls._HEADER_SIZE + cls._REPR.size:])
+
+        nw_obj = cls((ACEAccessFlags(content[0]), content[1], UUID(bytes_le=content[2]), UUID(bytes_le=content[3]), sid))
+
+        return nw_obj
+
+    def __len__(self):
+        '''Returns the logical size of the file'''
+        return cls._REPR.size + len(self.sid)
+
+    def __eq__(self, other):
+        if isinstance(other, ObjectACE):
+            return self.access_rights_flags == other.access_rights_flags \
+                and self.flags == other.flags and self.object_guid == other.object_guid \
+                and self.inherited_guid == other.inherited_guid and self.sid == other.sid
+        return False
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return self.__class__.__name__ + f'(access_rights_flags={self.access_rights_flags}, flags={self.flags}, object_guid={self.object_guid}, inherited_guid={self.inherited_guid}, sid={self.sid})'
+
+class CompoundACE():
+    '''Nobody knows this structure'''
+    pass
+
+class ACE(AttributeContentNoRepr):
+    _HEADER_SIZE = ACEHeader.get_representation_size()
+
+    def __init__(self, content=(None,)*3):
+        self.header, self.basic_ace, self.object_ace = content
+
+    @classmethod
+    def create_from_binary(cls, binary_stream):
+        nw_obj = cls()
+        header = ACEHeader.create_from_binary(binary_stream[:cls._HEADER_SIZE])
+
+        nw_obj.header = header
+
+        #TODO create a _dispatcher and replace this slow ass comparison
+        if "OBJECT" in header.type.name:
+            nw_obj.object_ace = ObjectACE.create_from_binary(binary_stream[cls._HEADER_SIZE:])
+        elif "COMPOUND" in header.type.name:
+            pass
+        else:
+            #self.basic_ace = BasicACE.create_from_binary(binary_stream[cls._HEADER_SIZE:header.ace_size - cls._HEADER_SIZE])
+            nw_obj.basic_ace = BasicACE.create_from_binary(binary_stream[cls._HEADER_SIZE:])
+
+        return nw_obj
+
+
+    def __len__(self):
+        '''Returns the logical size of the file'''
+        return self.header.ace_size
+
+    def __eq__(self, other):
+        if isinstance(other, ACE):
+            return self.header == other.header \
+                and self.basic_ace == other.basic_ace and self.object_ace == other.object_ace
+        return False
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return self.__class__.__name__ + f"(header={self.header}, basic_ace={self.basic_ace}, object_ace={self.object_ace})"
+
+class ACL(AttributeContentRepr):
+    _REPR = struct.Struct("<B1x2H2x")
+    ''' Revision number - 1
+        Padding - 1
+        Size - 2
+        ACE Count - 2
+        Padding - 2
+    '''
+
+    def __init__(self, content=(None,)*3, aces=None):
+        self.revision_number, self.size, _ = content
+        self.aces = aces
+
+    def _get_aces_len(self):
+        return len(self.aces)
+
+    #the name length can derived from the name, so, we don't need to keep in memory
+    aces_len = property(_get_aces_len, doc='Quantity of ACE objects')
+
+    @classmethod
+    def get_representation_size(cls):
+        '''Get the representation size in bytes, based on defined struct'''
+        return cls._REPR.size
+
+    @classmethod
+    def create_from_binary(cls, binary_stream):
+        '''Create the class from a binary stream'''
+        content = cls._REPR.unpack(binary_stream[:cls._REPR.size])
+        aces = []
+
+        offset = cls._REPR.size
+        for i in range(content[2]):
+            ace = ACE.create_from_binary(binary_stream[offset:])
+            offset += len(ace)
+            aces.append(ace)
+            _MOD_LOGGER.debug(f"Next ACE offset = {offset}")
+
+        if len(aces) != content[2]:
+            raise ContentError("Number of processed ACE entries different than expected.")
+
+        nw_obj = cls(content, aces)
+
+        return nw_obj
+
+    def __len__(self):
+        '''Returns the logical size of the file'''
+        return self.size
+
+    def __eq__(self, other):
+        if isinstance(other, ACL):
+            return self.revision_number == other.revision_number \
+                and self.size == other.size and self.aces == other.aces
+        return False
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return self.__class__.__name__ + f'(revision_number={self.revision_number}, size={self.size}, aces_len={self.aces_len}, aces={self.aces})'
+
+
+class SecurityDescriptor(AttributeContentNoRepr):
+    def __init__(self, content=(None,)*5):
+        self.header, self.owner_sid, self.group_sid, self.sacl, self.dacl = content
+
+    @classmethod
+    def create_from_binary(cls, binary_stream):
+        header = SecurityDescriptorHeader.create_from_binary(binary_stream[:SecurityDescriptorHeader.get_representation_size()])
+
+        owner_sid = SID.create_from_binary(binary_stream[header.owner_sid_offset:])
+        group_sid = SID.create_from_binary(binary_stream[header.group_sid_offset:])
+        dacl = None
+        sacl = None
+
+        if header.sacl_offset:
+            sacl = ACL.create_from_binary(binary_stream[header.sacl_offset:])
+        if header.dacl_offset:
+            dacl = ACL.create_from_binary(binary_stream[header.dacl_offset:])
+
+        #if header.usage_flags & MftUsageFlags.IN_USE:
+        #acl = ACL.create_from_binary(binary_stream[header.sacl])
+        nw_obj = cls((header, owner_sid, group_sid, sacl, dacl))
+
+        print(nw_obj)
+
+        return nw_obj
+
+
+    def __len__(self):
+        '''Returns the logical size of the file'''
+        pass
+        #return len(self.ea_list)
+
+    def __eq__(self, other):
+        if isinstance(other, SecurityDescriptor):
+            pass
+            #return self.ea_list == other.ea_list
+        return False
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return self.__class__.__name__ + f"(header={self.header}, owner_sid={str(self.owner_sid)}, group_sid={str(self.group_sid)}, sacl={str(self.sacl)}, dacl={str(self.dacl)})"
 
 
 #******************************************************************************
