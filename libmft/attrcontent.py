@@ -19,7 +19,8 @@ from math import ceil as _ceil
 from libmft.util.functions import convert_filetime, get_file_reference
 from libmft.flagsandtypes import AttrTypes, NameType, FileInfoFlags, \
     IndexEntryFlags, VolumeFlags, ReparseType, ReparseFlags, CollationRule, \
-    SecurityDescriptorFlags, ACEType, ACEControlFlags, ACEAccessFlags
+    SecurityDescriptorFlags, ACEType, ACEControlFlags, ACEAccessFlags, \
+    SymbolicLinkFlags
 from libmft.exceptions import ContentError
 
 _MOD_LOGGER = logging.getLogger(__name__)
@@ -698,16 +699,16 @@ class Data(AttributeContentNoRepr):
     very little and holds almost no information. If the data is resident, holds the
     content and the size.
     '''
-    def __init__(self, bin_view):
+    def __init__(self, binary_data):
         '''Initialize the class. Expects the binary_view that represents the
         content. Size information is derived from the content.
         '''
-        self.content = bin_view.tobytes()
+        self.content = binary_data
 
     @classmethod
     def create_from_binary(cls, binary_stream):
         '''Create the class from a binary stream'''
-        return cls(binary_stream)
+        return cls(binary_stream.tobytes())
 
     def __len__(self):
         '''Returns the logical size of the file'''
@@ -999,8 +1000,8 @@ class IndexRoot(AttributeContentRepr):
 #******************************************************************************
 class Bitmap(AttributeContentNoRepr):
     '''Represents the bitmap attribute'''
-    def __init__(self, bitmap_view):
-        self._bitmap = bitmap_view.tobytes()
+    def __init__(self, binary_data):
+        self._bitmap = binary_data
 
     def allocated_entries(self):
         '''Returs a generator that provides all the allocated entries
@@ -1026,7 +1027,7 @@ class Bitmap(AttributeContentNoRepr):
     @classmethod
     def create_from_binary(cls, binary_stream):
         '''Create the class from a binary stream'''
-        return cls(binary_stream)
+        return cls(binary_stream.tobytes())
 
     def __len__(self):
         '''Returns the size of the bitmap in bytes'''
@@ -1044,7 +1045,7 @@ class Bitmap(AttributeContentNoRepr):
 #******************************************************************************
 # REPARSE_POINT ATTRIBUTE
 #******************************************************************************
-class JunctionOrMount():
+class JunctionOrMount(AttributeContentRepr):
     _REPR = struct.Struct("<4H")
     ''' Offset to target name - 2 (relative to 16th byte)
         Length of target name - 2
@@ -1053,6 +1054,16 @@ class JunctionOrMount():
     '''
     def __init__(self, target_name=None, print_name=None):
         self.target_name, self.print_name = target_name, print_name
+
+    @classmethod
+    def get_representation_size(cls):
+        '''Returns the static size of the content never taking in consideration
+        variable fields, for example, names.
+
+        Returns:
+            int: The size of the content, in bytes
+        '''
+        return cls._REPR.size
 
     @classmethod
     def create_from_binary(cls, binary_view):
@@ -1068,26 +1079,92 @@ class JunctionOrMount():
             JunctionOrMount: New object using the binary stream as source
         '''
         content = cls._REPR.unpack(binary_view[:cls._REPR.size])
-        repar_point_size = ReparsePoint.get_static_content_size()
 
-        offset = repar_point_size + content[0]
+        offset = cls._REPR.size + content[0]
         target_name = binary_view[offset:offset+content[1]].tobytes().decode("utf_16_le")
-        offset = repar_point_size + content[2]
+        offset = cls._REPR.size + content[2]
         print_name = binary_view[offset:offset+content[3]].tobytes().decode("utf_16_le")
 
         return cls(target_name, print_name)
 
+    def __len__(self):
+        '''Returns the size of the bitmap in bytes'''
+        #TODO consider saving the offsets
+        return (len(self.target_name) + len(self.print_name) * 2)  + 4 #size of offsets
+
+    def __eq__(self, other):
+        if isinstance(other, JunctionOrMount):
+            return self.target_name == other.target_name and self.print_name == other.print_name
+        return False
+
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(target_name={}, print_name={})'.format(
-            self.target_name, self.print_name)
+        return self.__class__.__name__ + f'(target_name={self.target_name}, print_name={self.print_name})'
 
-class ReparsePoint():
+class SymbolicLink(AttributeContentRepr):
+    _REPR = struct.Struct("<4HI")
+    ''' Offset to target name - 2 (relative to 16th byte)
+        Length of target name - 2
+        Offset to print name - 2 (relative to 16th byte)
+        Length of print name - 2
+        Symbolic link flags - 4
+    '''
+    def __init__(self, target_name=None, print_name=None, sym_flags=None):
+        self.target_name, self.print_name, self.symbolic_flags = target_name, print_name, sym_flags
+
+    @classmethod
+    def get_representation_size(cls):
+        '''Returns the static size of the content never taking in consideration
+        variable fields, for example, names.
+
+        Returns:
+            int: The size of the content, in bytes
+        '''
+        return cls._REPR.size
+
+    @classmethod
+    def create_from_binary(cls, binary_view):
+        '''Creates a new object JunctionOrMount from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray.
+
+        Args:
+            binary_view (memoryview of bytearray) - A binary stream with the
+                information of an JunctionOrMount
+
+        Returns:
+            JunctionOrMount: New object using the binary stream as source
+        '''
+        content = cls._REPR.unpack(binary_view[:cls._REPR.size])
+
+        offset = cls._REPR.size + content[0]
+        target_name = binary_view[offset:offset+content[1]].tobytes().decode("utf_16_le")
+        offset = cls._REPR.size + content[2]
+        print_name = binary_view[offset:offset+content[3]].tobytes().decode("utf_16_le")
+
+        return cls(target_name, print_name, SymbolicLinkFlags(content[4]))
+
+    def __len__(self):
+        '''Returns the size of the bitmap in bytes'''
+        #TODO consider saving the offsets
+        return (len(self.target_name) + len(self.print_name) * 2)  + 8 #size of offsets + flags
+
+    def __eq__(self, other):
+        if isinstance(other, SymbolicLink):
+            return self.target_name == other.target_name and self.print_name == other.print_name \
+                and self.symbolic_flags == other.symbolic_flags
+        return False
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return self.__class__.__name__ + f'(target_name={self.target_name}, print_name={self.print_name}, symbolic_flags={self.symbolic_flags})'
+
+class ReparsePoint(AttributeContentRepr):
     _REPR = struct.Struct("<IH2x")
     ''' Reparse type flags - 4
             Reparse tag - 4 bits
             Reserved - 12 bits
-            Reparse type - 2
+            Reparse type - 2 bits
         Reparse data length - 2
         Padding - 2
     '''
@@ -1109,7 +1186,7 @@ class ReparsePoint():
         self.guid, self.data = content
 
     @classmethod
-    def get_static_content_size(cls):
+    def get_representation_size(cls):
         '''Returns the static size of the content never taking in consideration
         variable fields, for example, names.
 
@@ -1120,13 +1197,13 @@ class ReparsePoint():
 
     @classmethod
     def create_from_binary(cls, binary_view):
-        '''Creates a new object JunctionOrMount from a binary stream. The binary
+        '''Creates a new object ReparsePoint from a binary stream. The binary
         stream can be represented by a byte string, bytearray or a memoryview of the
         bytearray.
 
         Args:
             ReparsePoint (memoryview of bytearray) - A binary stream with the
-                information of an JunctionOrMount
+                information of an ReparsePoint
 
         Returns:
             ReparsePoint: New object using the binary stream as source
@@ -1135,24 +1212,36 @@ class ReparsePoint():
         nw_obj = cls()
 
         #reparse_tag (type, flags) data_len, guid, data
-        nw_obj.reparse_flag = ReparseFlags((content[0] & 0xF0000000) >> 28)
         nw_obj.reparse_type = ReparseType(content[0] & 0x0000FFFF)
+        nw_obj.reparse_flags = ReparseFlags((content[0] & 0xF0000000) >> 28)
         guid = None #guid exists only in third party reparse points
-        if nw_obj.reparse_flag & ReparseFlags.IS_MICROSOFT:#a microsoft tag
-            if nw_obj.reparse_type is ReparseType.MOUNT_POINT or nw_obj.reparse_type is ReparseType.SYMLINK:
+        if nw_obj.reparse_flags & ReparseFlags.IS_MICROSOFT:#a microsoft tag
+            if nw_obj.reparse_type is ReparseType.SYMLINK:
+                data = SymbolicLink.create_from_binary(binary_view[cls._REPR.size:])
+            elif nw_obj.reparse_type is ReparseType.MOUNT_POINT:
                 data = JunctionOrMount.create_from_binary(binary_view[cls._REPR.size:])
             else:
                 data = binary_view[cls._REPR.size:].tobytes()
         else:
-            guid = binary_view[cls._REPR.size:cls._REPR.size+16].tobytes()
-            data = binary_view[cls._REPR.size+len(guid):].tobytes()
+            guid = UUID(binary_view[cls._REPR.size:cls._REPR.size+16].tobytes())
+            data = binary_view[cls._REPR.size+16:].tobytes()
         nw_obj.data_len, nw_obj.guid, nw_obj.data = content[1], guid, data
 
         return nw_obj
 
+    def __len__(self):
+        '''Returns the size of the bitmap in bytes'''
+        return cls._REPR.size + self.data_len
+
+    def __eq__(self, other):
+        if isinstance(other, ReparsePoint):
+            return self.reparse_type == other.reparse_type and self.reparse_flags == other.reparse_flags \
+                and self.data_len == other.data_len and self.guid == other.guid and self.data == other.data
+        return False
+
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(reparse_flags={!s}, reparse_type={!s}, data_len={}, guid={}, data={})'.format(
+        return self.__class__.__name__ + '(reparse_type={!s}, reparse_flags={!s}, data_len={}, guid={}, data={})'.format(
             self.reparse_type, self.reparse_flags, self.data_len, self.guid, self.data)
 
 #******************************************************************************
@@ -1664,8 +1753,6 @@ class SecurityDescriptor(AttributeContentNoRepr):
         #if header.usage_flags & MftUsageFlags.IN_USE:
         #acl = ACL.create_from_binary(binary_stream[header.sacl])
         nw_obj = cls((header, owner_sid, group_sid, sacl, dacl))
-
-        print(nw_obj)
 
         return nw_obj
 

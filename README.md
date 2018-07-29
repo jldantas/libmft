@@ -110,6 +110,8 @@ P.S.: The implementation I used can be seen in the file parallel.py
 - Moved timestamps to its own class
 - Removed UID implementation in favor of standard library one
 - Added EA and SECURITY_DESCRIPTOR attributes
+- Fixed a problem with symbolic links and junction points
+- Small fix for reparse point flags
 
 ### Version 0.7
 

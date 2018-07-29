@@ -144,6 +144,11 @@ class ReparseFlags(enum.IntFlag):
     IS_HIGH_LATENCY = 0x4
     IS_MICROSOFT = 0x8
 
+class SymbolicLinkFlags(enum.IntFlag):
+    '''Represents the possible flags for the SymbolicLink class.'''
+    SYMLINK_FLAG_RELATIVE = 0x00000001
+
+
 class SecurityDescriptorFlags(enum.IntFlag):
     '''Represents the possible flags for the SecurityDescriptor class.'''
     SE_OWNER_DEFAULTED = 0x0001
