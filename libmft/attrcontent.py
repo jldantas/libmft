@@ -406,18 +406,7 @@ class AttributeList(AttributeContentNoRepr):
 
     @classmethod
     def create_from_binary(cls, binary_view):
-        '''Creates a new object AttributeList from a binary stream. The binary
-        stream can be represented by a byte string, bytearray or a memoryview of the
-        bytearray. As the AttributeList is a contatiner, the binary stream has
-        to have multiple AttributeListEntry encoded.
-
-        Args:
-            binary_view (memoryview of bytearray) - A binary stream with the
-                information of multiple AttributeListEntry
-
-        Returns:
-            AttributeList: New object using the binary stream as source
-        '''
+        """See base class."""
         attr_list = []
         offset = 0
 
@@ -480,17 +469,7 @@ class ObjectID(AttributeContentNoRepr):
 
     @classmethod
     def create_from_binary(cls, binary_view):
-        '''Creates a new object ObjectID from a binary stream. The binary
-        stream can be represented by a byte string, bytearray or a memoryview of the
-        bytearray.
-
-        Args:
-            binary_view (memoryview of bytearray) - A binary stream with the
-                information of an ObjectID
-
-        Returns:
-            ObjectID: New object using the binary stream as source
-        '''
+        """See base class."""
         uid_size = 16
 
         #some entries might not have all four ids, this line forces
@@ -529,17 +508,7 @@ class VolumeName(AttributeContentNoRepr):
 
     @classmethod
     def create_from_binary(cls, binary_view):
-        '''Creates a new object VolumeName from a binary stream. The binary
-        stream can be represented by a byte string, bytearray or a memoryview of the
-        bytearray.
-
-        Args:
-            binary_view (memoryview of bytearray) - A binary stream with the
-                information of an VolumeName
-
-        Returns:
-            VolumeName: New object using the binary stream as source
-        '''
+        """See base class."""
         name = binary_view.tobytes().decode("utf_16_le")
         _MOD_LOGGER.debug("ObjectID object created successfully")
 
@@ -587,22 +556,12 @@ class VolumeInformation(AttributeContentRepr):
 
     @classmethod
     def get_representation_size(cls):
-        '''Get the representation size in bytes, based on defined struct'''
+        """See base class."""
         return cls._REPR.size
 
     @classmethod
     def create_from_binary(cls, binary_view):
-        '''Creates a new object VolumeInformation from a binary stream. The binary
-        stream can be represented by a byte string, bytearray or a memoryview of the
-        bytearray.
-
-        Args:
-            binary_view (memoryview of bytearray) - A binary stream with the
-                information of an VolumeInformation
-
-        Returns:
-            VolumeInformation: New object using the binary stream as source
-        '''
+        """See base class."""
         content = cls._REPR.unpack(binary_view)
 
         nw_obj = cls(content)
@@ -686,28 +645,12 @@ class FileName(AttributeContentRepr):
 
     @classmethod
     def get_representation_size(cls):
-    #def get_static_content_size(cls):
-        '''Returns the static size of the content never taking in consideration
-        variable fields, for example, names.
-
-        Returns:
-            int: The size of the content, in bytes
-        '''
+        """See base class."""
         return cls._REPR.size
 
     @classmethod
     def create_from_binary(cls, binary_view):
-        '''Creates a new object FileName from a binary stream. The binary
-        stream can be represented by a byte string, bytearray or a memoryview of the
-        bytearray.
-
-        Args:
-            binary_view (memoryview of bytearray) - A binary stream with the
-                information of an FileName
-
-        Returns:
-            FileName: New object using the binary stream as source
-        '''
+        """See base class."""
         nw_obj = cls()
         content = cls._REPR.unpack(binary_view[:cls._REPR.size])
         name = binary_view[cls._REPR.size:].tobytes().decode("utf_16_le")
@@ -756,7 +699,7 @@ class Data(AttributeContentNoRepr):
 
     @classmethod
     def create_from_binary(cls, binary_stream):
-        '''Create the class from a binary stream'''
+        """See base class."""
         return cls(binary_stream.tobytes())
 
     def __len__(self):
@@ -804,27 +747,12 @@ class IndexNodeHeader(AttributeContentRepr):
 
     @classmethod
     def get_representation_size(cls):
-        '''Returns the static size of the content never taking in consideration
-        variable fields, for example, names.
-
-        Returns:
-            int: The size of the content, in bytes
-        '''
+        """See base class."""
         return cls._REPR.size
 
     @classmethod
     def create_from_binary(cls, binary_view):
-        '''Creates a new object IndexNodeHeader from a binary stream. The binary
-        stream can be represented by a byte string, bytearray or a memoryview of the
-        bytearray.
-
-        Args:
-            binary_view (memoryview of bytearray) - A binary stream with the
-                information of an IndexNodeHeader
-
-        Returns:
-            IndexNodeHeader: New object using the binary stream as source
-        '''
+        """See base class."""
         nw_obj = cls(cls._REPR.unpack(binary_view[:cls._REPR.size]))
         _MOD_LOGGER.debug("IndexNodeHeader object created successfully")
 
@@ -883,28 +811,12 @@ class IndexEntry(AttributeContentRepr):
 
     @classmethod
     def get_representation_size(cls):
-        '''Returns the static size of the content never taking in consideration
-        variable fields, for example, names.
-
-        Returns:
-            int: The size of the content, in bytes
-        '''
+        """See base class."""
         return cls._REPR.size
 
     @classmethod
     def create_from_binary(cls, binary_view, content_type=None):
-        '''Creates a new object IndexEntry from a binary stream. The binary
-        stream can be represented by a byte string, bytearray or a memoryview of the
-        bytearray.
-
-        Args:
-            binary_view (memoryview of bytearray) - A binary stream with the
-                information of an IndexEntry
-            content_type (AttrTypes) - Type of content present in the index
-
-        Returns:
-            IndexEntry: New object using the binary stream as source
-        '''
+        """See base class."""
         repr_size = cls._REPR.size
         content = cls._REPR.unpack(binary_view[:repr_size])
         nw_obj = cls()
@@ -981,27 +893,12 @@ class IndexRoot(AttributeContentRepr):
 
     @classmethod
     def get_representation_size(cls):
-        '''Returns the static size of the content never taking in consideration
-        variable fields, for example, names.
-
-        Returns:
-            int: The size of the content, in bytes
-        '''
+        """See base class."""
         return cls._REPR.size
 
     @classmethod
     def create_from_binary(cls, binary_view):
-        '''Creates a new object IndexRoot from a binary stream. The binary
-        stream can be represented by a byte string, bytearray or a memoryview of the
-        bytearray.
-
-        Args:
-            binary_view (memoryview of bytearray) - A binary stream with the
-                information of an IndexRoot
-
-        Returns:
-            IndexRoot: New object using the binary stream as source
-        '''
+        """See base class."""
         content = cls._REPR.unpack(binary_view[:cls._REPR.size])
         nw_obj = cls()
         nw_obj.node_header = IndexNodeHeader.create_from_binary(binary_view[cls._REPR.size:])
@@ -1075,7 +972,7 @@ class Bitmap(AttributeContentNoRepr):
 
     @classmethod
     def create_from_binary(cls, binary_stream):
-        '''Create the class from a binary stream'''
+        """See base class."""
         return cls(binary_stream.tobytes())
 
     def __len__(self):
@@ -1106,27 +1003,12 @@ class JunctionOrMount(AttributeContentRepr):
 
     @classmethod
     def get_representation_size(cls):
-        '''Returns the static size of the content never taking in consideration
-        variable fields, for example, names.
-
-        Returns:
-            int: The size of the content, in bytes
-        '''
+        """See base class."""
         return cls._REPR.size
 
     @classmethod
     def create_from_binary(cls, binary_view):
-        '''Creates a new object JunctionOrMount from a binary stream. The binary
-        stream can be represented by a byte string, bytearray or a memoryview of the
-        bytearray.
-
-        Args:
-            binary_view (memoryview of bytearray) - A binary stream with the
-                information of an JunctionOrMount
-
-        Returns:
-            JunctionOrMount: New object using the binary stream as source
-        '''
+        """See base class."""
         content = cls._REPR.unpack(binary_view[:cls._REPR.size])
 
         offset = cls._REPR.size + content[0]
@@ -1163,27 +1045,12 @@ class SymbolicLink(AttributeContentRepr):
 
     @classmethod
     def get_representation_size(cls):
-        '''Returns the static size of the content never taking in consideration
-        variable fields, for example, names.
-
-        Returns:
-            int: The size of the content, in bytes
-        '''
+        """See base class."""
         return cls._REPR.size
 
     @classmethod
     def create_from_binary(cls, binary_view):
-        '''Creates a new object JunctionOrMount from a binary stream. The binary
-        stream can be represented by a byte string, bytearray or a memoryview of the
-        bytearray.
-
-        Args:
-            binary_view (memoryview of bytearray) - A binary stream with the
-                information of an JunctionOrMount
-
-        Returns:
-            JunctionOrMount: New object using the binary stream as source
-        '''
+        """See base class."""
         content = cls._REPR.unpack(binary_view[:cls._REPR.size])
 
         offset = cls._REPR.size + content[0]
@@ -1236,27 +1103,12 @@ class ReparsePoint(AttributeContentRepr):
 
     @classmethod
     def get_representation_size(cls):
-        '''Returns the static size of the content never taking in consideration
-        variable fields, for example, names.
-
-        Returns:
-            int: The size of the content, in bytes
-        '''
+        """See base class."""
         return cls._REPR.size
 
     @classmethod
     def create_from_binary(cls, binary_view):
-        '''Creates a new object ReparsePoint from a binary stream. The binary
-        stream can be represented by a byte string, bytearray or a memoryview of the
-        bytearray.
-
-        Args:
-            ReparsePoint (memoryview of bytearray) - A binary stream with the
-                information of an ReparsePoint
-
-        Returns:
-            ReparsePoint: New object using the binary stream as source
-        '''
+        """See base class."""
         content = cls._REPR.unpack(binary_view[:cls._REPR.size])
         nw_obj = cls()
 
@@ -1371,12 +1223,12 @@ class EaEntry(AttributeContentRepr):
 
     @classmethod
     def get_representation_size(cls):
-        '''Get the representation size in bytes, based on defined struct'''
+        """See base class."""
         return cls._REPR.size
 
     @classmethod
     def create_from_binary(cls, binary_stream):
-        '''Create the class from a binary stream'''
+        """See base class."""
         content = cls._REPR.unpack(binary_stream[:cls._REPR.size])
         nw_obj = cls()
 
@@ -1415,7 +1267,7 @@ class Ea(AttributeContentNoRepr):
 
     @classmethod
     def create_from_binary(cls, binary_stream):
-        '''Create the class from a binary stream'''
+        """See base class."""
         ea_list = []
         offset = 0
 
@@ -1473,12 +1325,12 @@ class SecurityDescriptorHeader(AttributeContentRepr):
 
     @classmethod
     def get_representation_size(cls):
-        '''Get the representation size in bytes, based on defined struct'''
+        """See base class."""
         return cls._REPR.size
 
     @classmethod
     def create_from_binary(cls, binary_stream):
-        '''Create the class from a binary stream'''
+        """See base class."""
         nw_obj = cls(cls._REPR.unpack(binary_stream))
         nw_obj.control_flags = SecurityDescriptorFlags(nw_obj.control_flags)
 
@@ -1512,12 +1364,12 @@ class ACEHeader(AttributeContentRepr):
 
     @classmethod
     def get_representation_size(cls):
-        '''Get the representation size in bytes, based on defined struct'''
+        """See base class."""
         return cls._REPR.size
 
     @classmethod
     def create_from_binary(cls, binary_stream):
-        '''Create the class from a binary stream'''
+        """See base class."""
         nw_obj = cls()
         content = cls._REPR.unpack(binary_stream)
 
@@ -1561,12 +1413,12 @@ class SID(AttributeContentRepr):
 
     @classmethod
     def get_representation_size(cls):
-        '''Get the representation size in bytes, based on defined struct'''
+        """See base class."""
         return cls._REPR.size
 
     @classmethod
     def create_from_binary(cls, binary_stream):
-        '''Create the class from a binary stream'''
+        """See base class."""
         content = cls._REPR.unpack(binary_stream[:cls._REPR.size])
         if content[1]:
             sub_auth_repr = struct.Struct("<" + str(content[1]) + "I")
@@ -1610,12 +1462,12 @@ class BasicACE(AttributeContentRepr):
 
     @classmethod
     def get_representation_size(cls):
-        '''Get the representation size in bytes, based on defined struct'''
+        """See base class."""
         return cls._REPR.size
 
     @classmethod
     def create_from_binary(cls, binary_stream):
-        '''Create the class from a binary stream'''
+        """See base class."""
         access_flags = cls._REPR.unpack(binary_stream[:cls._REPR.size])[0]
         sid = SID.create_from_binary(binary_stream[cls._REPR.size:])
 
@@ -1652,12 +1504,12 @@ class ObjectACE(AttributeContentRepr):
 
     @classmethod
     def get_representation_size(cls):
-        '''Get the representation size in bytes, based on defined struct'''
+        """See base class."""
         return cls._REPR.size
 
     @classmethod
     def create_from_binary(cls, binary_stream):
-        '''Create the class from a binary stream'''
+        """See base class."""
         content = cls._REPR.unpack(binary_stream[cls._HEADER_SIZE:cls._HEADER_SIZE + cls._REPR.size])
         sid = SID.create_from_binary(binary_stream[cls._HEADER_SIZE + cls._REPR.size:])
 
@@ -1744,12 +1596,12 @@ class ACL(AttributeContentRepr):
 
     @classmethod
     def get_representation_size(cls):
-        '''Get the representation size in bytes, based on defined struct'''
+        """See base class."""
         return cls._REPR.size
 
     @classmethod
     def create_from_binary(cls, binary_stream):
-        '''Create the class from a binary stream'''
+        """See base class."""
         content = cls._REPR.unpack(binary_stream[:cls._REPR.size])
         aces = []
 
@@ -1787,6 +1639,7 @@ class SecurityDescriptor(AttributeContentNoRepr):
 
     @classmethod
     def create_from_binary(cls, binary_stream):
+        """See base class."""
         header = SecurityDescriptorHeader.create_from_binary(binary_stream[:SecurityDescriptorHeader.get_representation_size()])
 
         owner_sid = SID.create_from_binary(binary_stream[header.owner_sid_offset:])
