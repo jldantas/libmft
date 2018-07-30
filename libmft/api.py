@@ -512,6 +512,7 @@ class MFTConfig():
         self.entry_size = 0
         self.apply_fixup_array = True
         self.ignore_signature_check = True
+        self.create_initial_information = True
         self.load_dataruns = True
 
         for attr_type in AttrTypes:
@@ -561,15 +562,63 @@ class MFT():
         self.mft_config = mft_config
         self.mft_entry_size = self.mft_config.entry_size
         self._entries_parent_child = _defaultdict(list) #holds the relation ship between parent and child
-        self._empty_entries = set() #holds the empty entries
         self._entries_child_parent = {} #holds the relation between child and parent
+        self._empty_entries = set() #holds the empty entries
         self._number_valid_entries = 0
 
         if not self.mft_entry_size: #if entry size is zero, try to autodetect
             _MOD_LOGGER.info("Trying to detect MFT size entry")
             self.mft_entry_size = MFT._find_mft_size(file_pointer)
 
-        self._load_stub_info()
+        if self.mft_config.create_initial_information:
+            self._load_stub_info()
+
+    def copy_from_loaded_mft(other_mft):
+        #TODO do we need this?
+        import copy
+        self._entries_parent_child = copy.deepcopy(other_mft._entries_parent_child)
+        self._entries_child_parent = copy.deepcopy(other_mft._entries_child_parent)
+        self._empty_entries = copy.deepcopy(other_mft._empty_entries)
+        self._number_valid_entries = other_mft._number_valid_entries
+
+    def get_entry_full_path(self, entry_number=None, entry=None):
+        if entry_number is None and entry is None:
+            raise MFTError("Provide entry_number or entry parameters")
+        if entry_number is not None and entry is not None:
+            raise MFTError("Can't provide both entry_number and entry")
+
+        if entry_number:
+            working_entry = self[entry_number]
+        elif entry:
+            working_entry = entry
+        else:
+            raise MFTError("Something went very wrong when parsing the function arguments.")
+
+        fn_attr = working_entry.get_main_filename_attr()
+        if fn_attr is None:
+            raise EntryError("No FILENAME attribute available, can't calculate path", b"", working_entry.header.mft_record)
+
+        names = [fn_attr.content.name]
+        root_id = 5
+        index, seq = fn_attr.content.parent_ref, fn_attr.content.parent_seq
+        is_orphan = False
+
+        while index != root_id:
+            try:
+                parent_entry = self[index]
+
+                if seq != parent_entry.header.seq_number:
+                    is_orphan = True
+                    break
+                else:
+                    parent_fn_attr = parent_entry.get_main_filename_attr()
+                    index, seq = parent_fn_attr.content.parent_ref, parent_fn_attr.content.parent_seq
+                    names.append(parent_fn_attr.content.name)
+            except ValueError as e:
+                is_orphan = True
+                break
+
+        return (is_orphan, "\\".join(reversed(names)))
 
     def _load_stub_info(self):
         '''Load the minimum amount of information related to a MFT. This allows

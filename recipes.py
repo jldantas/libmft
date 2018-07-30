@@ -4,6 +4,7 @@ import logging
 #import libmft.api
 import libmft.api
 from libmft.flagsandtypes import AttrTypes, FileInfoFlags, MftUsageFlags
+from libmft.exceptions import EntryError
 
 _MOD_LOGGER = logging.getLogger("libmft")
 sh = logging.StreamHandler()
@@ -74,9 +75,9 @@ def stress_ads(mft_config):
         print(entry_n, mft.get_full_path(entry_n), mft[entry_n].get_names(), mft[entry_n].get_datastream_names())
 
 def test_my_mft():
-    test = "../../MFT_C.bin"
+    #test = "../../MFT_C.bin"
     #test = "../../my_mft.bin"
-    #test = "c:/cases/my_mft.bin"
+    test = "c:/cases/my_mft.bin"
     mft_config = libmft.api.MFTConfig()
     mft_config.load_dataruns = False
     mft_config.load_object_id = False
@@ -103,6 +104,10 @@ def test_my_mft():
         #print(mft[75429])
         #test_1(mft)
         for entry in mft:
+            try:
+                print(mft.get_entry_full_path(entry=entry))
+            except EntryError as e:
+                print("No available path")
             pass
 
 def test_botched_header():

@@ -1,12 +1,21 @@
 # -*- coding: utf-8 -*-
 '''
-This module contains all the known information about attributes. In particular,
-their content. By definition, as we have only the $MFT available for processing
-we can't have any of the content in case of non-resident attributes.
-That means that all the classes below EXPECT the attribute to be resident.
+Contains all contents for the attrbutes.
+
+The code here expects, as we have only the $MFT available for processing,
+contigous binary strings.
 
 Calling the constructors for a non-resident attribute MAY lead to an unxpected
 behaviour.
+
+Note:
+    This module is heavily dependent on the ``memoryview`` structure, as it
+    allows for slice and dicing without new copies.
+
+Todo:
+    * Rewrite commentaries
+
+.. moduleauthor:: Júlio Dantas <jldantas@gmail.com>
 '''
 import struct
 import logging
@@ -24,27 +33,35 @@ from libmft.flagsandtypes import AttrTypes, NameType, FileInfoFlags, \
 from libmft.exceptions import ContentError
 
 _MOD_LOGGER = logging.getLogger(__name__)
-
-#TODO verify, in general, if it is not better to encode the data within the
-#attributes as tuple or list and use properties to access by name
-
-#TODO rewrite the commentaries
-
+'''logging.Logger: Module level logger for all the logging needs of the module'''
 
 #******************************************************************************
 # ABSTRACT CLASS FOR ATTRIBUTE CONTENT
 #******************************************************************************
 class AttributeContentBase(metaclass=ABCMeta):
-    '''Base class for attributes.'''
+    '''Base class for attribute's content.
+
+    This class is an interface to all the attribute's contents. It can't be
+    instantiated and serves only a general interface.
+    '''
+
     @classmethod
     @abstractmethod
     def create_from_binary(cls, binary_stream):
-        '''Create the class from a binary stream'''
+        '''Creates an object from from a binary stream.
+
+        Args:
+            binary_stream (memoryview): A buffer access to the underlying binary
+                stream
+
+        Returns:
+            A new object of whatever type has overloaded the method.
+        '''
         pass
 
     @abstractmethod
     def __len__(self):
-        '''Get the actual size of the content, as some attributes have variable sizes'''
+        '''Get the actual size of the content, in bytes, as some attributes have variable sizes.'''
         pass
 
     @abstractmethod
@@ -52,36 +69,71 @@ class AttributeContentBase(metaclass=ABCMeta):
         pass
 
 class AttributeContentNoRepr(AttributeContentBase):
+    '''Base class for attribute's content that don't have a fixed representation.
+
+    This class is an interface to the attribute's contents. It can't be
+    instantiated and serves only a general interface.
+    '''
     pass
 
 class AttributeContentRepr(AttributeContentBase):
-    '''Most, if not all attributes have a representation in binary, this forces
-    a particular interface when using them'''
+    '''Base class for attribute's content that don't have a fixed representation.
+
+    This class is an interface to the attribute's contents. It can't be
+    instantiated and serves only a general interface.
+    '''
+
     @classmethod
     @abstractmethod
     def get_representation_size(cls):
-        '''Get the representation size in bytes, based on defined struct'''
+        '''Get the representation size, in bytes, based on defined struct'''
         pass
 
 #******************************************************************************
 # TIMESTAMPS class
 #******************************************************************************
 class Timestamps(AttributeContentRepr):
+    '''Represents a group of timestamps based on how MFT records.
+
+    Aggregates the entries for timesamps when dealing with standard NTFS timestamps,
+    e.g., created, changed, mft change and accessed. All attributes are time zone
+    aware.
+
+    Note:
+        This class receives an Iterable as argument, the "Parameters/Args" section
+        represents what must be inside the Iterable. The Iterable MUST preserve
+        order or things might go boom.
+
+    Args:
+        content[0] (:obj:`datetime`): Created timestamp
+        content[1] (datetime): Changed timestamp
+        content[2] (datetime): MFT change timestamp
+        content[3] (datetime): Accessed timestamp
+
+    Attributes:
+        created (datetime): A datetime with the created timestamp
+        changed (datetime): A datetime with the changed timestamp
+        mft_changed (datetime): A datetime with the mft_changed timestamp
+        accessed (datetime): A datetime with the accessed timestamp
+    '''
+
     _REPR = struct.Struct("<4Q")
 
     def __init__(self, content=(None,)*4):
-        '''Represents a timestamp and uses exactly a 4-element tuple
-
-        Args:
-            content (iterable), where:
-                [0] (datetime) - created time
-                [1] (datetime) - changed time
-                [2] (datetime) - mft change time
-                [3] (datetime) - accessed
-        '''
+        """Check class docstring"""
         self.created, self.changed, self.mft_changed, self.accessed = content
 
     def astimezone(self, timezone):
+        """Changes the time zones of all timestamps.
+
+        Receives a new timezone and applies to all timestamps, if necessary.
+
+        Args:
+            timezone (:obj:`tzinfo`): Time zone to be applied
+
+        Returns:
+            A new ``Timestamps`` object if the time zone changes, otherwise returns ``self``.
+        """
         if self.created.tzinfo is timezone:
             return self
         else:
@@ -95,21 +147,12 @@ class Timestamps(AttributeContentRepr):
 
     @classmethod
     def get_representation_size(cls):
+        """See base class."""
         return cls._REPR.size
 
     @classmethod
     def create_from_binary(cls, binary_stream):
-        '''Creates a new object Timestamps from a binary stream. The binary
-        stream can be represented by a byte string, bytearray or a memoryview of the
-        bytearray.
-
-        Args:
-            binary_view (memoryview of bytearray) - A binary stream with the
-                information of the attribute
-
-        Returns:
-            Timestamps: New object using hte binary stream as source
-        '''
+        """See base class."""
         repr = cls._REPR
 
         if len(binary_stream) != repr.size:
@@ -143,9 +186,41 @@ class Timestamps(AttributeContentRepr):
 # STANDARD_INFORMATION ATTRIBUTE
 #******************************************************************************
 class StandardInformation(AttributeContentRepr):
-    '''Represents the STANDARD_INFORMATION converting the timestamps to
-    datetimes and the flags to FileInfoFlags representation.'''
-    _TIMESTAMP_SIZE = Timestamps.get_representation_size() #TODO looks ugly... fix
+    '''Represents the STANDARD_INFORMATION attribute.
+
+    Has all the data structures to represent a STANDARD_INFORMATION attribute,
+    allowing everything to be accessed with python objects/types.
+
+    Note:
+        This class receives an Iterable as argument, the "Parameters/Args" section
+        represents what must be inside the Iterable. The Iterable MUST preserve
+        order or things might go boom.
+
+    Args:
+        content[0] (:obj:`Timestamps`): Timestamp object
+        content[1] (:obj:`FileInfoFlags`): A FIleInfoFlags object with the flags
+            for this object
+        content[2] (int): Maximum number of allowed versions
+        content[3] (int): Current version number
+        content[4] (int): Class id
+        content[5] (int): Owner id
+        content[6] (int): Security id
+        content[7] (int): Quota charged
+        content[8] (int): Update Sequence Number (USN)
+
+    Attributes:
+        timestamps (:obj:`Timestamps`): All attribute's timestamps
+        flags (:obj:`FileInfoFlags`): STANDARD_INFORMATION flags for the file
+        max_n_versions (int): Maximum number of allowed versions
+        version_number (int): Current version number
+        class_id (int): Class id
+        owner_id (int): Owner id
+        security_id (int): Security id
+        quota_charged (int): Quota charged
+        usn (int): Update Sequence Number (USN)
+    '''
+    #TODO looks ugly... fix
+    _TIMESTAMP_SIZE = Timestamps.get_representation_size()
     _REPR = struct.Struct("<4I2I2Q")
     _REPR_NO_NFTS_3_EXTENSION = struct.Struct("<4I")
     '''
@@ -174,7 +249,7 @@ class StandardInformation(AttributeContentRepr):
             content (iterable), where:
                 [0] (Timestamps) - Timestamp object with the correct timestamps
                 [1] (FileInfoFlags) - flags
-                [2] (int) - maximum number of versions
+                [2] (int) - aximum number of versions
                 [3] (int) - version number
                 [4] (int) - Owner id
                 [5] (int) - Security id
@@ -187,28 +262,12 @@ class StandardInformation(AttributeContentRepr):
 
     @classmethod
     def get_representation_size(cls):
-        '''Returns the static size of the content never taking in consideration
-        variable fields, for example, names.
-
-        Returns:
-            int: The size of the content, in bytes
-        '''
+        """See base class."""
         return cls._TIMESTAMP_SIZE + cls._REPR.size
-
 
     @classmethod
     def create_from_binary(cls, binary_stream):
-        '''Creates a new object StandardInformation from a binary stream. The binary
-        stream can be represented by a byte string, bytearray or a memoryview of the
-        bytearray.
-
-        Args:
-            binary_view (memoryview of bytearray) - A binary stream with the
-                information of the attribute
-
-        Returns:
-            StandardInformation: New object using hte binary stream as source
-        '''
+        """See base class."""
         _MOD_LOGGER.debug("Unpacking STANDARD_INFORMATION content")
 
         timestamps = Timestamps.create_from_binary(binary_stream[:cls._TIMESTAMP_SIZE])
@@ -292,22 +351,12 @@ class AttributeListEntry(AttributeContentRepr):
 
     @classmethod
     def get_representation_size(cls):
-        '''Get the representation size in bytes, based on defined struct'''
+        """See base class."""
         return cls._REPR.size
 
     @classmethod
     def create_from_binary(cls, binary_view):
-        '''Creates a new object AttributeListEntry from a binary stream. The binary
-        stream can be represented by a byte string, bytearray or a memoryview of the
-        bytearray.
-
-        Args:
-            binary_view (memoryview of bytearray) - A binary stream with the
-                information of the attribute
-
-        Returns:
-            AttributeListEntry: New object using hte binary stream as source
-        '''
+        """See base class."""
         _MOD_LOGGER.debug("Unpacking ATTRIBUTE_LIST content")
         content = cls._REPR.unpack(binary_view[:cls._REPR.size])
         nw_obj = cls()
@@ -1223,7 +1272,7 @@ class ReparsePoint(AttributeContentRepr):
             else:
                 data = binary_view[cls._REPR.size:].tobytes()
         else:
-            guid = UUID(binary_view[cls._REPR.size:cls._REPR.size+16].tobytes())
+            guid = UUID(bytes_le=binary_view[cls._REPR.size:cls._REPR.size+16].tobytes())
             data = binary_view[cls._REPR.size+16:].tobytes()
         nw_obj.data_len, nw_obj.guid, nw_obj.data = content[1], guid, data
 
