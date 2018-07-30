@@ -683,7 +683,7 @@ class FileName(AttributeContentRepr):
         return False
 
     def __len__(self):
-        return  FileName._REPR.size + name_len
+        return  FileName._REPR.size + len(name_len.encode("utf_16_le"))
 
     def __repr__(self):
         'Return a nicely formatted representation string'
@@ -978,7 +978,7 @@ class IndexRoot(AttributeContentRepr):
 
     def __len__(self):
         '''Get the actual size of the content, as some attributes have variable sizes'''
-        return self.cls._REPR.size
+        return cls._REPR.size
 
     def __eq__(self, other):
         if isinstance(other, IndexRoot):
@@ -1090,7 +1090,7 @@ class JunctionOrMount(AttributeContentRepr):
     def __len__(self):
         '''Returns the size of the bitmap in bytes'''
         #TODO consider saving the offsets
-        return (len(self.target_name) + len(self.print_name) * 2)  + 4 #size of offsets
+        return len(self.target_name.encode("utf_16_le")) + len(self.print_nameencode("utf_16_le"))  + 4 #size of offsets
 
     def __eq__(self, other):
         if isinstance(other, JunctionOrMount):
@@ -1147,7 +1147,7 @@ class SymbolicLink(AttributeContentRepr):
     def __len__(self):
         '''Returns the size of the bitmap in bytes'''
         #TODO consider saving the offsets
-        return (len(self.target_name) + len(self.print_name) * 2)  + 8 #size of offsets + flags
+        return len(self.target_name.encode("utf_16_le")) + len(self.print_nameencode("utf_16_le"))  + 8 #size of offsets + flags
 
     def __eq__(self, other):
         if isinstance(other, SymbolicLink):
@@ -1348,7 +1348,7 @@ class EaEntry(AttributeContentRepr):
 
     def __len__(self):
         '''Returns the size of the entry'''
-        return self.offset_next_ea
+        return cls._REPR.size + len(self.name.encode("ascii")) + self.value_len
 
     def __eq__(self, other):
         if isinstance(other, EaEntry):
@@ -1759,13 +1759,13 @@ class SecurityDescriptor(AttributeContentNoRepr):
 
     def __len__(self):
         '''Returns the logical size of the file'''
-        pass
-        #return len(self.ea_list)
+        return len(self.header) + len(self.owner_sid) + len(self.group_sid) + len(self.sacl) + len(self.dacl)
 
     def __eq__(self, other):
         if isinstance(other, SecurityDescriptor):
-            pass
-            #return self.ea_list == other.ea_list
+            return self.header == other.header and self.owner_sid == other.owner_sid \
+                and self.group_sid == other.group_sid and self.sacl == other.sacl \
+                and self.dacl == other.dacl
         return False
 
     def __repr__(self):
