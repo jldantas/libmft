@@ -148,7 +148,6 @@ class SymbolicLinkFlags(enum.IntFlag):
     '''Represents the possible flags for the SymbolicLink class.'''
     SYMLINK_FLAG_RELATIVE = 0x00000001
 
-
 class SecurityDescriptorFlags(enum.IntFlag):
     '''Represents the possible flags for the SecurityDescriptor class.'''
     SE_OWNER_DEFAULTED = 0x0001
@@ -186,3 +185,6 @@ class ACEAccessFlags(enum.IntFlag):
     GENERIC_EXECUTE = 0x20000000
     GENERIC_WRITE = 0x40000000
     GENERIC_READ = 0x80000000
+
+class EAFlags(enum.IntFlag):
+    NEED_EA = 0x80 

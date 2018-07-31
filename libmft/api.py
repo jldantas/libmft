@@ -3,30 +3,49 @@
 -Definition of the API
 This module is reponsible for the main parts that are exposed to the calling application.
 
+
+
 - Structure of the API
 
 The MFT has a number of different entries of type MFTEntry, these entries
 have a header (MFTHeader) and a 'n' number of attributes and the attributes
 have a header and a content. A rough of diagram can be seen below:
 
-+-----+
-| MFT |
-+--+--+
-   |     +----------+
-   +-----+ MFTEntry |          +--------+
-   |     +----------+    +-----+ Header |
-   |     +----------+    |     +--------+          +--------+
-   +-----+ MFTEntry +----+                      +--+ Header |
-   |     +----------+    |      +------------+  |  +--------+
-   |          X          +------+ Attributes +--+
-   |                     |      +------------+  |  +---------+
-   |          X          |            X         +--+ Content |
-   |                     |                         +---------+
-   |          X          |            X
-   |                     |
-   |     +----------+    |      +------------+
-   +-----+ MFTEntry |    +------+ Attributes |
-         +----------+           +------------+
+Diagram::
+
+    +-----+
+    | MFT |
+    +--+--+
+       |    +----------+
+       +----+ MFTEntry |       +-----------+
+       |    +----------+  +----+ MFTHeader |
+       |                  |    +-----------+       +-----------------+
+       |    +----------+  |                    +---+ AttributeHeader |
+       +----+ MFTEntry +--+    +------------+  |   +-----------------+
+       |    +----------+  +----+ Attributes +--+
+       |         X        |    +------------+  |   +---------+
+       |                  |          X         +---+ Content |
+       |         X        |                        +---------+
+       |                  |          X
+       |         X        |
+       |                  |          X
+       |         X        |    +------------+
+       |                  +----+ Attributes |
+       |         X        |    +------------+
+       |                  |
+       |         X        |    +------------+
+       |                  +----+ Datastream |
+       |         X        |    +------------+
+       |                  |          X
+       |         X        |
+       |                  |          X
+       |         X        |
+       |                  |          X
+       |         X        |    +------------+
+       |    +----------+  +----+ Datastream |
+       +----+ MFTEntry |       +------------+
+            +----------+
+
 
 -- MFT - Represents the MFT
 -- MFTEntry - Represents one entry from the logical perspective, i.e., even if
@@ -43,6 +62,8 @@ have a header and a content. A rough of diagram can be seen below:
 While a entry provides a logical MFT entry, a logical MFT entry may contain
 multiple logical entries (hard links and data streams) which means that one entry
 needs to be correctly processed to show all the data
+
+.. moduleauthor:: Júlio Dantas <jldantas@gmail.com>
 '''
 import struct
 import logging

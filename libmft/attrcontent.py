@@ -12,6 +12,10 @@ Note:
     This module is heavily dependent on the ``memoryview`` structure, as it
     allows for slice and dicing without new copies.
 
+Important:
+    The implementation of __len__ in the classes here is meant to return the
+    size in bytes, unless otherwise mentioned.
+
 Todo:
     * Rewrite commentaries
 
@@ -29,7 +33,7 @@ from libmft.util.functions import convert_filetime, get_file_reference
 from libmft.flagsandtypes import AttrTypes, NameType, FileInfoFlags, \
     IndexEntryFlags, VolumeFlags, ReparseType, ReparseFlags, CollationRule, \
     SecurityDescriptorFlags, ACEType, ACEControlFlags, ACEAccessFlags, \
-    SymbolicLinkFlags
+    SymbolicLinkFlags, EAFlags
 from libmft.exceptions import ContentError
 
 _MOD_LOGGER = logging.getLogger(__name__)
@@ -86,7 +90,11 @@ class AttributeContentRepr(AttributeContentBase):
     @classmethod
     @abstractmethod
     def get_representation_size(cls):
-        '''Get the representation size, in bytes, based on defined struct'''
+        '''Get the representation size, in bytes, based on defined struct
+
+        Returns:
+            An ``int`` with the size of the structure
+        '''
         pass
 
 #******************************************************************************
@@ -186,7 +194,7 @@ class Timestamps(AttributeContentRepr):
 # STANDARD_INFORMATION ATTRIBUTE
 #******************************************************************************
 class StandardInformation(AttributeContentRepr):
-    '''Represents the STANDARD_INFORMATION attribute.
+    '''Represents the STANDARD_INFORMATION content.
 
     Has all the data structures to represent a STANDARD_INFORMATION attribute,
     allowing everything to be accessed with python objects/types.
@@ -240,22 +248,7 @@ class StandardInformation(AttributeContentRepr):
     '''
 
     def __init__(self, content=(None,)*8):
-        '''Creates a StandardInformation object. The content has to be an iterable
-        with precisely 0 elements in order.
-        If content is not provided, a 0 element tuple, where all elements are
-        None, is the default argument
-
-        Args:
-            content (iterable), where:
-                [0] (Timestamps) - Timestamp object with the correct timestamps
-                [1] (FileInfoFlags) - flags
-                [2] (int) - aximum number of versions
-                [3] (int) - version number
-                [4] (int) - Owner id
-                [5] (int) - Security id
-                [6] (int) - Quota charged
-                [7] (int) - Update Sequence Number
-        '''
+        """Check class docstring"""
         self.timestamps, self.flags, self.max_n_versions, self.version_number, \
         self.class_id, self.owner_id,  \
         self.security_id, self.quota_charged, self.usn = content
@@ -308,7 +301,36 @@ class StandardInformation(AttributeContentRepr):
 # ATTRIBUTE_LIST ATTRIBUTE
 #******************************************************************************
 class AttributeListEntry(AttributeContentRepr):
-    '''This class holds one entry on the attribute list attribute.'''
+    '''Represents an entry for ATTRIBUTE_LIST.
+
+    Has all the data structures to represent one entry of the ATTRIBUTE_LIST
+    content allowing everything to be accessed with python objects/types.
+
+    Note:
+        This class receives an Iterable as argument, the "Parameters/Args" section
+        represents what must be inside the Iterable. The Iterable MUST preserve
+        order or things might go boom.
+
+    Args:
+        content[0] (:obj:`AttrTypes`): Type of the attribute in the entry
+        content[1] (int): Length of the entry, in bytes
+        content[2] (int): Length of the name, in bytes
+        content[3] (int): Offset to the name, in bytes
+        content[4] (int): Start VCN
+        content[5] (int): File reference number
+        content[6] (int): File sequence number
+        content[7] (int): Attribute ID
+        content[8] (int): Name
+
+    Attributes:
+        attr_type (:obj:`Timestamps`): Type of the attribute in the entry
+        name_offset (int): Offset to the name, in bytes
+        start_vcn (int): Start VCN
+        file_ref (int): File reference number
+        file_seq (int): File sequence number
+        attr_id (int): Attribute ID
+        name (int): Name
+    '''
     _REPR = struct.Struct("<IH2B2QH")
     '''
         Attribute type - 4
@@ -322,32 +344,19 @@ class AttributeListEntry(AttributeContentRepr):
     '''
 
     def __init__(self, content=(None,)*9):
-        '''Creates an AttributeListEntry object. The content has to be an iterable
-        with precisely 9 elements in order.
-        If content is not provided, a tuple filled with 'None' is the default
-        argument.
-
-        Args:
-            content (iterable), where:
-                [0] (AttrTypes) - Attribute type
-                [1] (int) - length of the entry
-                [2] (int) - length of the name
-                [3] (int) - offset to the name
-                [4] (int) - start vcn
-                [5] (int) - file reference number
-                [6] (int) - file sequence number
-                [7] (int) - attribute id
-                [8] (str) - name
-        '''
+        """Check class docstring"""
         self.attr_type, self._entry_len, _, self.name_offset, \
         self.start_vcn, self.file_ref, self.file_seq, self.attr_id, self.name = content
 
     def _get_name_length(self):
-        '''Returns the length of the name based on the name'''
+        '''int:Returns the length of the name based on the name'''
         if self.name is None:
             return 0
         else:
             return len(self.name)
+
+    #the name length can derived from the name, so, we don't need to keep in memory
+    name_len = property(_get_name_length, doc='Length of the name')
 
     @classmethod
     def get_representation_size(cls):
@@ -374,9 +383,6 @@ class AttributeListEntry(AttributeContentRepr):
 
         return nw_obj
 
-    #the name length can derived from the name, so, we don't need to keep in memory
-    name_len = property(_get_name_length, doc='Length of the name')
-
     def __len__(self):
         '''Returns the size of the entry, in bytes'''
         return self._entry_len
@@ -392,85 +398,105 @@ class AttributeListEntry(AttributeContentRepr):
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f'(attr_type={self.attr_type}, entry_len={self._entry_len}, name_len={self.name_len}, name_offset={self.name_offset}, start_vcn={self.start_vcn}, file_ref={self.file_ref}, file_seq={self.file_seq}, attr_id={self.attr_id}, name={self.name})'
+        return self.__class__.__name__ + f'(attr_type={self.attr_type}, _entry_len={self._entry_len}, name_len={self.name_len}, name_offset={self.name_offset}, start_vcn={self.start_vcn}, file_ref={self.file_ref}, file_seq={self.file_seq}, attr_id={self.attr_id}, name={self.name})'
 
 class AttributeList(AttributeContentNoRepr):
-    '''Represents the ATTRIBUTE_LIST attribute, holding all the entries, if available,
-    as AttributeListEntry objects.'''
+    '''Represents the contents for the ATTRIBUTE_LIST attribute.
+
+    Is a list of AttributeListEntry. It behaves as list in python, you can iterate
+    over it, access by member, etc.
+
+    Important:
+        Using the ``len()`` method on the objects of this class returns the number
+        of elements in the list.
+
+    Args:
+        content (list(:obj:`AttributeListEntry`)): List of AttributeListEntry
+    '''
 
     def __init__(self, content=[]):
-        '''Creates an AttributeList content representation. Content has to be a
-        list of AttributeListEntry that will be referred by the object. To create
-        from a binary string, use the function 'create_from_binary' '''
-        self.attr_list = content
+        """Check class docstring"""
+        self._attr_list = content
 
     @classmethod
     def create_from_binary(cls, binary_view):
         """See base class."""
-        attr_list = []
+        _attr_list = []
         offset = 0
 
         while True:
             _MOD_LOGGER.debug("Creating AttributeListEntry object from binary stream...")
             entry = AttributeListEntry.create_from_binary(binary_view[offset:])
             offset += len(entry)
-            attr_list.append(entry)
+            _attr_list.append(entry)
             if offset >= len(binary_view):
                 break
             _MOD_LOGGER.debug(f"Next AttributeListEntry offset = {offset}")
         _MOD_LOGGER.debug("AttributeListEntry object created successfully")
 
-        return cls(attr_list)
+        return cls(_attr_list)
 
     def __len__(self):
         '''Return the number of entries in the attribute list'''
-        return len(self.attr_list)
+        return len(self._attr_list)
 
     def __iter__(self):
         '''Return the iterator for the representation of the list, so it is
         easier to check everything'''
-        return iter(self.attr_list)
+        return iter(self._attr_list)
 
     def __getitem__(self, index):
         '''Return the AttributeListEntry at the specified position'''
-        return _getitem(self.attr_list, index)
+        return _getitem(self._attr_list, index)
 
     def __eq__(self, other):
         if isinstance(other, AttributeList):
-            return self.attr_list == other.attr_list
+            return self._attr_list == other._attr_list
         return False
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f'(attr_list={self.attr_list})'
+        return self.__class__.__name__ + f'(_attr_list={self._attr_list})'
 
 #******************************************************************************
 # OBJECT_ID ATTRIBUTE
 #******************************************************************************
 class ObjectID(AttributeContentNoRepr):
-    '''This class represents an Object ID.'''
+    '''Represents the content of the OBJECT_ID attribute.
+
+    Important:
+        When reading from binary, some entries may not have all the members,
+        in this case the code creates None entries.
+
+    Note:
+        This class receives an Iterable as argument, the "Parameters/Args" section
+        represents what must be inside the Iterable. The Iterable MUST preserve
+        order or things might go boom.
+
+    Args:
+        content[0] (:obj:`UUID`): Object id
+        content[1] (:obj:`UUID`): Birth volume id
+        content[2] (:obj:`UUID`): Birth object id
+        content[3] (:obj:`UUID`): Birth domain id
+
+    Attributes:
+        object_id (UUID): Unique ID assigned to file
+        birth_vol_id (UUID): ID of the volume where the file was created
+        birth_object_id (UUID): Original Object ID of the file
+        birth_domain_id (UUID): Domain where the object was created
+    '''
+    _UUID_SIZE = 16
 
     def __init__(self,  content=(None,)*4):
-        '''Creates a StandardInformation object. The content has to be an iterable
-        with precisely 4 elements in order.
-        If content is not provided, a 4 element tuple, where all elements are
-        None, is the default argument.
-
-        Args:
-            content (iterable), where:
-                [0] (UID) - object id
-                [1] (UID) - birth volume id
-                [2] (UID) - virth object id
-                [3] (UID) - birth domain id
-        '''
+        """Check class docstring"""
         self.object_id, self.birth_vol_id, self.birth_object_id, \
         self.birth_domain_id = content
-        self.__size = sum([16 for data in content if content is not None])
+        self._size = sum([ObjectID._UUID_SIZE for data in content if content is not None])
 
     @classmethod
     def create_from_binary(cls, binary_view):
         """See base class."""
-        uid_size = 16
+        uid_size = ObjectID._UUID_SIZE
 
         #some entries might not have all four ids, this line forces
         #to always create 4 elements, so contruction is easier
@@ -481,7 +507,7 @@ class ObjectID(AttributeContentNoRepr):
 
     def __len__(self):
         '''Get the actual size of the content, as some attributes have variable sizes'''
-        return self.__size
+        return self._size
 
     def __eq__(self, other):
         if isinstance(other, ObjectID):
@@ -497,14 +523,28 @@ class ObjectID(AttributeContentNoRepr):
 # VOLUME_NAME ATTRIBUTE
 #******************************************************************************
 class VolumeName(AttributeContentNoRepr):
-    '''This class represents a VolumeName attribute.'''
-    def __init__(self, name):
-        '''Initialize a VolumeName object, receives the name of the volume:
+    """Represents the content of the VOLUME_NAME attribute.
 
-        Args:
-            name (str) - name of the volume
-        '''
+    Args:
+        name (str): Volume's name
+
+    Attributes:
+        name (str): Volume's name
+    """
+
+    def __init__(self, name):
+        """Check class docstring"""
         self.name = name
+
+    def _get_name_length(self):
+        """int: Returns the length of the name based on the name"""
+        if self.name is None:
+            return 0
+        else:
+            return len(self.name)
+
+    #the name length can derived from the name, so, we don't need to keep in memory
+    name_len = property(_get_name_length, doc='Length of the name')
 
     @classmethod
     def create_from_binary(cls, binary_view):
@@ -515,8 +555,8 @@ class VolumeName(AttributeContentNoRepr):
         return cls(name)
 
     def __len__(self):
-        '''Returns the length of the name'''
-        return len(self.name)
+        """Returns the size of the attribute, in bytes, encoded in utf_16_le"""
+        return len(self.name.encode("utf_16_le"))
 
     def __eq__(self, other):
         if isinstance(other, VolumeName):
@@ -531,7 +571,26 @@ class VolumeName(AttributeContentNoRepr):
 # VOLUME_INFORMATION ATTRIBUTE
 #******************************************************************************
 class VolumeInformation(AttributeContentRepr):
-    '''This class represents a VolumeInformation attribute.'''
+    '''Represents the content of the VOLUME_INFORMATION attribute
+
+    Interprets the volume information as per viewed by MFT. Contains information
+    like version and the state of the volume.
+
+    Note:
+        This class receives an Iterable as argument, the "Parameters/Args" section
+        represents what must be inside the Iterable. The Iterable MUST preserve
+        order or things might go boom.
+
+    Args:
+        content[0] (int): Major version
+        content[1] (int): Minor version
+        content[2] (:obj:`VolumeFlags`): Volume flags
+
+    Attributes:
+        major_ver (int): Major version
+        minor_ver (int): Minor version
+        vol_flags (:obj:`VolumeFlags`): Volume flags
+    '''
 
     _REPR = struct.Struct("<8x2BH")
     ''' Unknow - 8
@@ -541,17 +600,7 @@ class VolumeInformation(AttributeContentRepr):
     '''
 
     def __init__(self, content=(None,)*3):
-        '''Creates a VolumeInformation object. The content has to be an iterable
-        with precisely 3 elements in order.
-        If content is not provided, a 3 element tuple, where all elements are
-        None, is the default argument
-
-        Args:
-            content (iterable), where:
-                [0] (int) - major version
-                [1] (int) - minor version
-                [2] (VolumeFlags) - Volume flags
-        '''
+        """Check class docstring"""
         self.major_ver, self.minor_ver, self.vol_flags = content
 
     @classmethod
@@ -572,7 +621,7 @@ class VolumeInformation(AttributeContentRepr):
 
     def __len__(self):
         '''Returns the length of the attribute'''
-        return cls._REPR.size
+        return VolumeInformation._REPR.size
 
     def __eq__(self, other):
         if isinstance(other, VolumeInformation):
@@ -588,17 +637,53 @@ class VolumeInformation(AttributeContentRepr):
 # FILENAME ATTRIBUTE
 #******************************************************************************
 class FileName(AttributeContentRepr):
-    '''Represents the FILE_NAME converting the timestamps to
-    datetimes and the flags to FileInfoFlags representation.
+    '''Represents the content of a FILENAME attribute.
 
-    It is important to note that windows apparently does not update the fields
-    "allocated size of file" and "real size of file". These should be calculated
-    using the data attributes for correct informaiton.
+    The FILENAME attribute is one of the most important for MFT. It is not a mandatory
+    field, but if present, holds multiple timestamps, flags of the file and the name
+    of the file. It may be present multiple times.
+
+    Warning:
+        The information related to "allocated file size" and "real file size"
+        in this attribute is NOT reliable. Blame Microsoft. If you want a more
+        reliable information, use the ``Datastream`` objects in the api module.
+
+    Note:
+        This class receives an Iterable as argument, the "Parameters/Args" section
+        represents what must be inside the Iterable. The Iterable MUST preserve
+        order or things might go boom.
+
+    Args:
+        content[0] (int): Parent reference
+        content[1] (int): Parent sequence
+        content[2] (:obj:`Timestamps`): Filename timestamps
+        content[3] (int): Allocated size of the file
+        content[4] (int): Logica/Real file size
+        content[5] (:obj:`FileInfoFlags`): File flags
+        content[6] (int): Reparse value
+        content[7] (int): Name length
+        content[8] (:obj:`NameType`): Name type
+        content[9] (str): Name
+
+    Attributes:
+        created (datetime): A datetime with the created timestamp
+        changed (datetime): A datetime with the changed timestamp
+        mft_changed (datetime): A datetime with the mft_changed timestamp
+        accessed (datetime): A datetime with the accessed timestamp
+
+        parent_ref (int): Parent refence
+        parent_seq (int): Parent sequence
+        timestamps (:obj:`FileInfoFlags`Timestamps): Filename timestamps
+        alloc_file_size (int): Allocated size of the file
+        real_file_size (int): Logica/Real file size
+        flags (:obj:`FileInfoFlags`): File flags
+        reparse_value (int): Reparse value
+        name_type (:obj:`NameType`): Name type
+        name (str): Name
     '''
-    #_REPR = struct.Struct("<7Q2I2B")
+
     _TIMESTAMP_SIZE = Timestamps.get_representation_size() #TODO looks ugly... fix
     _REPR = struct.Struct("<1Q32x2Q2I2B")
-    #_REPR = struct.Struct("<5Q16x2I2B")
     ''' File reference to parent directory - 8
         TIMESTAMPS(32)
             Creation time - 8
@@ -615,29 +700,13 @@ class FileName(AttributeContentRepr):
     '''
 
     def __init__(self, content=(None, )*10):
-        '''Creates a FileName object. The content has to be an iterable
-        with precisely 11 elements in order.
-        If content is not provided, a tuple filled with 'None' is the default
-        argument.
-
-        Args:
-            content (iterable), where:
-                [0] (int) - parent refence
-                [1] (int) - parent sequence
-                [2] (Timestamps) - timestampes
-                [3] (int) - allocated file size
-                [4] (int) - real file size
-                [5] (FileInfoFlags) - flags
-                [6] (int) - reparse value
-                [7] (int) - name length
-                [8] (NameType) - name type
-                [9] (str) - name
-        '''
+        """Check class docstring"""
         self.parent_ref, self.parent_seq, self.timestamps, self.alloc_file_size, \
         self.real_file_size, self.flags, self.reparse_value, _, self.name_type, \
         self.name = content
 
     def _get_name_len(self):
+        """int: Returns the length of the name based on the name"""
         return len(self.name)
 
     #the name length can derived from the name, so, we don't need to keep in memory
@@ -675,7 +744,7 @@ class FileName(AttributeContentRepr):
         return False
 
     def __len__(self):
-        return  FileName._REPR.size + len(name_len.encode("utf_16_le"))
+        return  FileName._REPR.size + len(name.encode("utf_16_le"))
 
     def __repr__(self):
         'Return a nicely formatted representation string'
@@ -687,14 +756,20 @@ class FileName(AttributeContentRepr):
 # DATA ATTRIBUTE
 #******************************************************************************
 class Data(AttributeContentNoRepr):
-    '''This is a placeholder class to the data attribute. By itself, it does
+    '''Represents the content of a DATA attribute.
+
+    This is a placeholder class to the data attribute. By itself, it does
     very little and holds almost no information. If the data is resident, holds the
     content and the size.
+
+    Args:
+        binary_data (:obj:`bytes`): Data content
+
+    Attributes:
+        content (:obj:`bytes`): Data content
     '''
     def __init__(self, binary_data):
-        '''Initialize the class. Expects the binary_view that represents the
-        content. Size information is derived from the content.
-        '''
+        """Check class docstring"""
         self.content = binary_data
 
     @classmethod
@@ -720,7 +795,28 @@ class Data(AttributeContentNoRepr):
 #******************************************************************************
 class IndexNodeHeader(AttributeContentRepr):
     '''Represents the Index Node Header, that is always present in the INDEX_ROOT
-    and INDEX_ALLOCATION attribute.'''
+    and INDEX_ALLOCATION attribute.
+
+    The composition of an INDEX_ROOT and INDEX_ALLOCATION always start with
+    a header. This class represents this header.
+
+    Note:
+        This class receives an Iterable as argument, the "Parameters/Args" section
+        represents what must be inside the Iterable. The Iterable MUST preserve
+        order or things might go boom.
+
+    Args:
+        content[0] (int): Start offset
+        content[1] (int): End offset
+        content[2] (int): Allocated size of the node
+        content[3] (int): Non-leaf node Flag (has subnodes)
+
+    Attributes:
+        start_offset (int): Start offset
+        end_offset (int): End offset
+        end_alloc_offset (int): Allocated size of the node
+        flags (int): Non-leaf node Flag (has subnodes)
+    '''
 
     _REPR = struct.Struct("<4I")
     ''' Offset to start of index entry - 4
@@ -730,18 +826,7 @@ class IndexNodeHeader(AttributeContentRepr):
     '''
 
     def __init__(self, content=(None,)*4):
-        '''Creates a IndexNodeHeader object. The content has to be an iterable
-        with precisely 4 elements in order.
-        If content is not provided, a 4 element tuple, where all elements are
-        None, is the default argument
-
-        Args:
-            content (iterable), where:
-                [0] (int) - start offset
-                [1] (int) - end offset
-                [2] (int) - allocated size of the node
-                [3] (int) - non-leaf node Flag (has subnodes)
-        '''
+        """Check class docstring"""
         self.start_offset, self.end_offset, self.end_alloc_offset, \
         self.flags = content
 
@@ -760,7 +845,7 @@ class IndexNodeHeader(AttributeContentRepr):
 
     def __len__(self):
         '''Get the actual size of the content, as some attributes have variable sizes'''
-        return cls._REPR.size
+        return IndexNodeHeader._REPR.size
 
     def __eq__(self, other):
         if isinstance(other, IndexNodeHeader):
@@ -775,7 +860,33 @@ class IndexNodeHeader(AttributeContentRepr):
         return self.__class__.__name__ + f'(start_offset={self.start_offset}, end_offset={self.end_offset}, end_alloc_offset={self.end_alloc_offset}, flags={self.flags})'
 
 class IndexEntry(AttributeContentRepr):
-    '''Represents an entry in the index.'''
+    '''Represents an entry in the index.
+
+    An Index, from the MFT perspective is composed of multiple entries. This class
+    represents these entries. Normally entries contain a FILENAME attribute.
+    Note the entry can have other types of content, for these cases the class
+    saves the raw bytes
+
+    Note:
+        This class receives an Iterable as argument, the "Parameters/Args" section
+        represents what must be inside the Iterable. The Iterable MUST preserve
+        order or things might go boom.
+
+    Args:
+        content[0] (int): File reference?
+        content[1] (int): Length of the entry
+        content[2] (int): Length of the content
+        content[3] (:obj:`IndexEntryFlags`): Flags
+        content[4] (:obj:`FileName` or bytes): Content of the entry
+        content[5] (int): VCN child node
+
+    Attributes:
+        generic (int): File reference?
+        content_len (int): Length of the content
+        flags (:obj:`IndexEntryFlags`): Flags
+        content (:obj:`FileName` or bytes): Content of the entry
+        vcn_child_node (int): VCN child node
+    '''
 
     _REPR = struct.Struct("<Q2HI")
     ''' Undefined - 8
@@ -788,25 +899,12 @@ class IndexEntry(AttributeContentRepr):
     _REPR_VCN = struct.Struct("<Q")
 
     def __init__(self, content=(None,)*6):
-        '''Creates a StandardInformation object. The content has to be an iterable
-        with precisely 0 elements in order.
-        If content is not provided, a 0 element tuple, where all elements are
-        None, is the default argument
-
-        Args:
-            content (iterable), where:
-                [0] (int) - file reference?
-                [1] (int) - length of the entry
-                [2] (int) - length of the content
-                [3] (int) - flags (1 = index has a sub-node, 2 = last index entry in the node)
-                [4] (FileName or binary_string) - content
-                [5] (int) - vcn child node
-        '''
+        """Check class docstring"""
         #TODO don't save this here and overload later?
         #TODO confirm if this is really generic or is always a file reference
         #this generic variable changes depending what information is stored
         #in the index
-        self.generic, self.entry_len, self.content_len, self.flags, \
+        self.generic, self._entry_len, self.content_len, self.flags, \
         self.content, self.vcn_child_node = content
 
     @classmethod
@@ -833,7 +931,7 @@ class IndexEntry(AttributeContentRepr):
             boundary_fix = (content[1] - temp_size) % 8
             vcn_child_node = cls._REPR_VCN.unpack(binary_view[temp_size+boundary_fix:temp_size+boundary_fix+8])
 
-        nw_obj.generic, nw_obj.entry_len, nw_obj.content_len, nw_obj.flags, \
+        nw_obj.generic, nw_obj._entry_len, nw_obj.content_len, nw_obj.flags, \
         nw_obj.content, nw_obj.vcn_child_node = content[0], content[1], content[2], \
             IndexEntryFlags(content[3]), binary_content, vcn_child_node
         _MOD_LOGGER.debug("IndexEntry object created successfully")
@@ -842,12 +940,12 @@ class IndexEntry(AttributeContentRepr):
 
     def __len__(self):
         '''Get the actual size of the content, as some attributes have variable sizes'''
-        return self.entry_len
+        return self._entry_len
 
     def __eq__(self, other):
         if isinstance(other, IndexEntry):
             return self.generic == other.generic \
-                and self.entry_len == other.entry_len \
+                and self._entry_len == other._entry_len \
                 and self.content_len == other.content_len \
                 and self.flags == other.flags and self.content == other.content \
                 and self.vcn_child_node == other.vcn_child_node
@@ -855,12 +953,35 @@ class IndexEntry(AttributeContentRepr):
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(generic={}, entry_len={}, content_len={}, flags={!s}, content={}, vcn_child_node={})'.format(
-            self.generic, self.entry_len, self.content_len, self.flags,
-            self.content, self.vcn_child_node)
+        return f'{self.__class__.__name__}(generic={self.generic}, _entry_len={self._entry_len}, content_len={self.content_len}, flags={str(self.flags)}, content={self.content}, vcn_child_node={self.vcn_child_node})'
 
 class IndexRoot(AttributeContentRepr):
-    '''Represents the INDEX_ROOT'''
+    '''Represents the content of a INDEX_ROOT attribute.
+
+    The structure of an index is a B+ tree, as such an root is always present.
+
+    Note:
+        This class receives an Iterable as argument, the "Parameters/Args" section
+        represents what must be inside the Iterable. The Iterable MUST preserve
+        order or things might go boom.
+
+    Args:
+        content[0] (:obj:`AttrTypes`): Attribute type
+        content[1] (:obj:`CollationRule`): Collation rule
+        content[2] (int): Index record size in bytes
+        content[3] (int): Index record size in clusters
+        node_header (IndexNodeHeader) - Node header related to this index root
+        idx_entry_list (list(IndexEntry))- List of index entries that belong to
+            this index root
+
+    Attributes:
+        attr_type (:obj:`AttrTypes`): Attribute type
+        collation_rule (:obj:`CollationRule`): Collation rule
+        index_len_in_bytes (int): Index record size in bytes
+        index_len_in_cluster (int): Index record size in clusters
+        node_header (IndexNodeHeader): Node header related to this index root
+        index_entry_list (list(IndexEntry)): List of index entries that belong to
+    '''
 
     _REPR = struct.Struct("<3IB3x")
     ''' Attribute type - 4
@@ -871,21 +992,7 @@ class IndexRoot(AttributeContentRepr):
     '''
 
     def __init__(self, content=(None,)*4, node_header=None, idx_entry_list=None):
-        '''Creates a IndexRoot object. The content has to be an iterable
-        with precisely 4 elements in order.
-        If content is not provided, a 4 element tuple, where all elements are
-        None, is the default argument
-
-        Args:
-            content (iterable), where:
-                [0] (AttrTypes) - attribute type
-                [1] (CollationRule) - collation rule
-                [2] (int) - index record size in bytes
-                [3] (int) - index record size in clusters
-            node_header (IndexNodeHeader) - the node header related to this index root
-            idx_entry_list (list of IndexEntry)- list of index entries that belong to
-                this index root
-        '''
+        """Check class docstring"""
         self.attr_type, self.collation_rule, self.index_len_in_bytes, \
         self.index_len_in_cluster = content
         self.node_header = node_header
@@ -913,7 +1020,7 @@ class IndexRoot(AttributeContentRepr):
             if entry.flags & IndexEntryFlags.LAST_ENTRY:
                 break
             else:
-                offset += entry.entry_len
+                offset += len(entry)
 
         nw_obj.index_entry_list = index_entry_list
         nw_obj.attr_type, nw_obj.collation_rule, nw_obj.index_len_in_bytes, \
@@ -924,7 +1031,7 @@ class IndexRoot(AttributeContentRepr):
 
     def __len__(self):
         '''Get the actual size of the content, as some attributes have variable sizes'''
-        return cls._REPR.size
+        return IndexRoot._REPR.size
 
     def __eq__(self, other):
         if isinstance(other, IndexRoot):
@@ -945,24 +1052,50 @@ class IndexRoot(AttributeContentRepr):
 # BITMAP ATTRIBUTE
 #******************************************************************************
 class Bitmap(AttributeContentNoRepr):
-    '''Represents the bitmap attribute'''
+    '''Represents the content of a BITMAP attribute.
+
+    Correctly represents a bitmap as seen by the MFT. That basically means that
+    the underlying data structure is interpreted bit by bit, where if the bit
+    is 1, the entry is "occupied"/allocated.
+
+
+    Args:
+        binary_data (:obj:`bytes`): The bytes where the data is maintained
+    '''
     def __init__(self, binary_data):
+        """Check class docstring"""
         self._bitmap = binary_data
 
     def allocated_entries(self):
-        '''Returs a generator that provides all the allocated entries
-        for the bitmap'''
+        '''Creates a generator that returns all allocated entries in the
+        bitmap.
+
+        Yields:
+            int: The bit index of the allocated entries.
+
+        '''
         for entry_number in range(len(self._bitmap) * 8):
             if self.entry_allocated(entry_number):
                 yield entry_number
 
     def entry_allocated(self, entry_number):
-        '''Check if an entry is allocated'''
+        """Checks if a particular index is allocated.
+
+        Args:
+            entry_number (int): Index to verify
+
+        Returns:
+            bool: True if it is allocated, False otherwise.
+        """
         index, offset = divmod(entry_number, 8)
         return bool(self._bitmap[index] & (1 << offset))
 
     def get_next_empty(self):
-        '''Returns the next empty entry'''
+        """Returns the next empty entry.
+
+        Returns:
+            int: The value of the empty entry
+        """
         #TODO probably not the best way, redo
         for i, byte in enumerate(self._bitmap):
             if byte != 255:
@@ -986,19 +1119,33 @@ class Bitmap(AttributeContentNoRepr):
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f'(bitmap={self._bitmap})'
+        return f'{self.__class__.__name__}(bitmap={self._bitmap})'
 
 #******************************************************************************
 # REPARSE_POINT ATTRIBUTE
 #******************************************************************************
 class JunctionOrMount(AttributeContentRepr):
+    '''Represents the content of a REPARSE_POINT attribute when it is a junction
+    or mount point.
+
+    Args:
+        target_name (str): Target name
+        print_name (str): Print name
+
+    Attributes:
+        target_name (str): Target name
+        print_name (str): Print name
+    '''
+
     _REPR = struct.Struct("<4H")
     ''' Offset to target name - 2 (relative to 16th byte)
         Length of target name - 2
         Offset to print name - 2 (relative to 16th byte)
         Length of print name - 2
     '''
+
     def __init__(self, target_name=None, print_name=None):
+        """Check class docstring"""
         self.target_name, self.print_name = target_name, print_name
 
     @classmethod
@@ -1020,7 +1167,6 @@ class JunctionOrMount(AttributeContentRepr):
 
     def __len__(self):
         '''Returns the size of the bitmap in bytes'''
-        #TODO consider saving the offsets
         return len(self.target_name.encode("utf_16_le")) + len(self.print_nameencode("utf_16_le"))  + 4 #size of offsets
 
     def __eq__(self, other):
@@ -1033,6 +1179,20 @@ class JunctionOrMount(AttributeContentRepr):
         return self.__class__.__name__ + f'(target_name={self.target_name}, print_name={self.print_name})'
 
 class SymbolicLink(AttributeContentRepr):
+    '''Represents the content of a REPARSE_POINT attribute when it is a
+    symbolic link.
+
+    Args:
+        target_name (str): Target name
+        print_name (str): Print name
+        sym_flags (:obj:`SymbolicLinkFlags`): Symbolic link flags
+
+    Attributes:
+        target_name (str): Target name
+        print_name (str): Print name
+        sym_flags (:obj:`SymbolicLinkFlags`): Symbolic link flags
+    '''
+
     _REPR = struct.Struct("<4HI")
     ''' Offset to target name - 2 (relative to 16th byte)
         Length of target name - 2
@@ -1040,8 +1200,11 @@ class SymbolicLink(AttributeContentRepr):
         Length of print name - 2
         Symbolic link flags - 4
     '''
+
     def __init__(self, target_name=None, print_name=None, sym_flags=None):
-        self.target_name, self.print_name, self.symbolic_flags = target_name, print_name, sym_flags
+        """Check class docstring"""
+        self.target_name, self.print_name, self.symbolic_flags = \
+            target_name, print_name, sym_flags
 
     @classmethod
     def get_representation_size(cls):
@@ -1062,7 +1225,6 @@ class SymbolicLink(AttributeContentRepr):
 
     def __len__(self):
         '''Returns the size of the bitmap in bytes'''
-        #TODO consider saving the offsets
         return len(self.target_name.encode("utf_16_le")) + len(self.print_nameencode("utf_16_le"))  + 8 #size of offsets + flags
 
     def __eq__(self, other):
@@ -1076,6 +1238,41 @@ class SymbolicLink(AttributeContentRepr):
         return self.__class__.__name__ + f'(target_name={self.target_name}, print_name={self.print_name}, symbolic_flags={self.symbolic_flags})'
 
 class ReparsePoint(AttributeContentRepr):
+    '''Represents the content of a REPARSE_POINT attribute.
+
+    The REPARSE_POINT attribute is a little more complicated. We can have
+    Microsoft predefinied content and third-party content. As expected,
+    this completely changes how the data is interpreted.
+
+    All Microsoft types of REPARSE_POINT can be gathered from the winnt.h file.
+    However, as of now, only two have been implemented:
+
+        * Symbolic Links - SYMLINK
+        * Mount or junction point - MOUNT_POINT
+
+    As for third-party data, this is always saved in raw (bytes).
+
+    Note:
+        This class receives an Iterable as argument, the "Parameters/Args" section
+        represents what must be inside the Iterable. The Iterable MUST preserve
+        order or things might go boom.
+
+    Args:
+        content[0] (:obj:`ReparseType`): Reparse point type
+        content[1] (:obj:`ReparseFlags`): Reparse point flags
+        content[2] (int): Reparse data length
+        content[3] (:obj:`UUID`): GUID
+        content[4] (*variable*): Content of the reparse type
+
+    Attributes:
+        reparse_type (:obj:`ReparseType`): Reparse point type
+        reparse_flags (:obj:`ReparseFlags`): Reparse point flags
+        data_len (int): Reparse data length
+        guid (:obj:`UUID`): GUID. This exists only in the third-party
+            reparse points. If it is a Microsoft one, it defaults to ``None``
+        data (*variable*): Content of the reparse type
+    '''
+
     _REPR = struct.Struct("<IH2x")
     ''' Reparse type flags - 4
             Reparse tag - 4 bits
@@ -1084,20 +1281,9 @@ class ReparsePoint(AttributeContentRepr):
         Reparse data length - 2
         Padding - 2
     '''
-    def __init__(self, content=(None,)*5):
-        '''Creates a IndexRoot object. The content has to be an iterable
-        with precisely 5 elements in order.
-        If content is not provided, a 5 element tuple, where all elements are
-        None, is the default argument
 
-        Args:
-            content (iterable), where:
-                [0] (ReparseType) - Reparse point type
-                [1] (ReparseFlags) - Reparse point flags
-                [2] (int) - reparse data length
-                [3] (binary str) - guid (exists only in 3rd party reparse points)
-                [4] (variable) - content of the reparse type
-        '''
+    def __init__(self, content=(None,)*5):
+        """Check class docstring"""
         self.reparse_type, self.reparse_flags, self.data_len, \
         self.guid, self.data = content
 
@@ -1132,7 +1318,7 @@ class ReparsePoint(AttributeContentRepr):
 
     def __len__(self):
         '''Returns the size of the bitmap in bytes'''
-        return cls._REPR.size + self.data_len
+        return ReparsePoint._REPR.size + self.data_len
 
     def __eq__(self, other):
         if isinstance(other, ReparsePoint):
@@ -1142,38 +1328,55 @@ class ReparsePoint(AttributeContentRepr):
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(reparse_type={!s}, reparse_flags={!s}, data_len={}, guid={}, data={})'.format(
-            self.reparse_type, self.reparse_flags, self.data_len, self.guid, self.data)
+        return f'{self.__class__.__name__}(reparse_type={str(self.reparse_type)}, reparse_flags={str(self.reparse_flags)}, data_len={self.data_len}, guid={self.guid}, data={self.data})'
 
 #******************************************************************************
 # EA_INFORMATION ATTRIBUTE
 #******************************************************************************
 class EaInformation(AttributeContentRepr):
+    '''Represents the content of a EA_INFORMATION attribute.
+
+    The (HPFS) extended attribute information ($EA_INFORMATION) contains
+    information about the extended attribute ($EA).
+
+    Note:
+        This class receives an Iterable as argument, the "Parameters/Args" section
+        represents what must be inside the Iterable. The Iterable MUST preserve
+        order or things might go boom.
+
+    Args:
+        content[0] (int): Size of the EA attribute entry
+        content[1] (int): Number of EA attributes with NEED_EA set
+        content[2] (int): Size of the EA data
+
+    Attributes:
+        entry_len (int): Size of the EA attribute entry
+        ea_set_number (int): Number of EA attributes with NEED_EA set
+        ea_size (int): Size of the EA data
+    '''
+
     _REPR = struct.Struct("<2HI")
     ''' Size of Extended Attribute entry - 2
         Number of Extended Attributes which have NEED_EA set - 2
         Size of extended attribute data - 4
     '''
-    # def __init__(self, point_view):
-    #     self.entry_len, self.ea_set_number, self.ea_size = \
-    #         EaInformation._REPR.unpack(point_view[:EaInformation._REPR.size])
 
     def __init__(self, content=(None,)*3):
+        """Check class docstring"""
         self.entry_len, self.ea_set_number, self.ea_size = content
 
     @classmethod
     def get_representation_size(cls):
-        '''Get the representation size in bytes, based on defined struct'''
+        """See base class."""
         return cls._REPR.size
 
     @classmethod
     def create_from_binary(cls, binary_stream):
-        '''Create the class from a binary stream'''
+        """See base class."""
         return cls(cls._REPR.unpack(binary_stream[:cls._REPR.size]))
 
     def __len__(self):
-        '''Returns the logical size of the file'''
-        return cls._REPR.size
+        return EaInformation._REPR.size
 
     def __eq__(self, other):
         if isinstance(other, EaInformation):
@@ -1183,12 +1386,42 @@ class EaInformation(AttributeContentRepr):
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f'(entry_len={self.entry_len}, ea_set_number={self.ea_set_number}, ea_size={self.ea_size})'
+        return f'{self.__class__.__name__}(entry_len={self.entry_len}, ea_set_number={self.ea_set_number}, ea_size={self.ea_size})'
 
 #******************************************************************************
 # EA ATTRIBUTE
 #******************************************************************************
 class EaEntry(AttributeContentRepr):
+    '''Represents an entry for EA.
+
+    The EA attribute is composed by multiple EaEntries. Some information is not
+    completely understood for this. One of those is if it is necessary some
+    kind of aligment from the name to the value. The code considers a 8 byte
+    aligment and calculates that automatically.
+
+    Warning:
+        The interpretation of the binary data MAY be wrong. The community does
+        not have all the data.
+
+    Note:
+        This class receives an Iterable as argument, the "Parameters/Args" section
+        represents what must be inside the Iterable. The Iterable MUST preserve
+        order or things might go boom.
+
+    Args:
+        content[0] (int): Offset to the next EA
+        content[1] (:obj:`EAFlags`): Changed timestamp
+        content[2] (str): Name of the EA attribute
+        content[3] (bytes): Value of the attribute
+
+    Attributes:
+        offset_next_ea (int): Offset to next extended attribute entry.
+            The offset is relative from the start of the extended attribute data.
+        flags (:obj:`EAFlags`): Changed timestamp
+        name (str): Name of the EA attribute
+        value (bytes): Value of the attribute
+    '''
+
     _REPR = struct.Struct("<I2BH")
     ''' Offset to the next EA  - 4
         Flags - 1
@@ -1197,24 +1430,15 @@ class EaEntry(AttributeContentRepr):
     '''
 
     def __init__(self, content=(None,)*4):
-        '''Creates a EaEntry object. The content has to be an iterable
-        with precisely 6 elements in order.
-        If content is not provided, a 6 element tuple, where all elements are
-        None, is the default argument
-
-        Args:
-            content (iterable), where:
-                [0] (int) - Offset to the next EA
-                [1] (int) - Flags
-                [2] (str) - name
-                [3] (bytes) - value
-        '''
+        """Check class docstring"""
         self.offset_next_ea, self.flags, self.name, self.value = content
 
     def _get_name_len(self):
+        """int: Returns the length of the name"""
         return len(self.name)
 
     def _get_value_len(self):
+        """int: Returns the length of the value"""
         return len(self.value)
 
     #the name length can derived from the name, so, we don't need to keep in memory
@@ -1238,10 +1462,9 @@ class EaEntry(AttributeContentRepr):
         #TODO confirm if this is true
         value_alignment = (_ceil((cls._REPR.size + content[2]) / 8) * 8)
         value = binary_stream[value_alignment:value_alignment + content[3]].tobytes()
-        #value = binary_stream[cls._REPR.size + content[2]:cls._REPR.size + content[2] + content[3]].tobytes()
 
         nw_obj.offset_next_ea, nw_obj.flags, nw_obj.name, nw_obj.value = \
-            content[0], content[1], name, value
+            content[0], EAFlags(content[1]), name, value
 
         _MOD_LOGGER.debug(f"New EaEntry {repr(nw_obj)}")
 
@@ -1249,7 +1472,7 @@ class EaEntry(AttributeContentRepr):
 
     def __len__(self):
         '''Returns the size of the entry'''
-        return cls._REPR.size + len(self.name.encode("ascii")) + self.value_len
+        return EaEntry._REPR.size + len(self.name.encode("ascii")) + self.value_len
 
     def __eq__(self, other):
         if isinstance(other, EaEntry):
@@ -1259,56 +1482,94 @@ class EaEntry(AttributeContentRepr):
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f'(offset_next_ea={self.offset_next_ea}, flags={self.flags}, name={self.name}, value={self.value}, name_len={self.name_len}, value_len={self.value_len})'
+        return f'{self.__class__.__name__}(offset_next_ea={self.offset_next_ea}, flags={str(self.flags)}, name={self.name}, value={self.value}, name_len={self.name_len}, value_len={self.value_len})'
 
 class Ea(AttributeContentNoRepr):
+    '''Represents the content of a EA attribute.
+
+    Is a list of EaEntry. It behaves as list in python, you can iterate
+    over it, access by member, etc.
+
+    Important:
+        Using the ``len()`` method on the objects of this class returns the number
+        of elements in the list.
+
+    Args:
+        content (list(:obj:`EaEntry`)): List of AttributeListEntry
+    '''
+
     def __init__(self, content):
-        self.ea_list = content
+        """Check class docstring"""
+        self._ea_list = content
 
     @classmethod
     def create_from_binary(cls, binary_stream):
         """See base class."""
-        ea_list = []
+        _ea_list = []
         offset = 0
 
         _MOD_LOGGER.debug(f"Creating Ea object from binary stream {binary_stream.tobytes()}...")
         while True:
             entry = EaEntry.create_from_binary(binary_stream[offset:])
-            offset += len(entry)
-            ea_list.append(entry)
+            offset += entry.offset_next_ea
+            _ea_list.append(entry)
             if offset >= len(binary_stream):
                 break
             _MOD_LOGGER.debug(f"Next EaEntry offset = {offset}")
-        _MOD_LOGGER.debug(f"Ea object created successfully. {ea_list}")
+        _MOD_LOGGER.debug(f"Ea object created successfully. {_ea_list}")
 
-        return cls(ea_list)
+        return cls(_ea_list)
 
     def __iter__(self):
         '''Return the iterator for the representation of the list, so it is
         easier to check everything'''
-        return iter(self.ea_list)
+        return iter(self._ea_list)
 
     def __getitem__(self, index):
         '''Return the AttributeListEntry at the specified position'''
-        return _getitem(self.ea_list, index)
+        return _getitem(self._ea_list, index)
 
     def __len__(self):
         '''Returns the logical size of the file'''
-        return len(self.ea_list)
+        return len(self._ea_list)
 
     def __eq__(self, other):
         if isinstance(other, Ea):
-            return self.ea_list == other.ea_list
+            return self._ea_list == other._ea_list
         return False
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f"(ea_list={self.ea_list})"
+        return self.__class__.__name__ + f"(_ea_list={self._ea_list})"
 
 #******************************************************************************
 # SECURITY_DESCRIPTOR ATTRIBUTE
 #******************************************************************************
 class SecurityDescriptorHeader(AttributeContentRepr):
+    '''Represents the header of the SECURITY_DESCRIPTOR attribute.
+
+    Note:
+        This class receives an Iterable as argument, the "Parameters/Args" section
+        represents what must be inside the Iterable. The Iterable MUST preserve
+        order or things might go boom.
+
+    Args:
+        content[0] (int): Revision number
+        content[1] (:obj:`SecurityDescriptorFlags`): Control flags
+        content[2] (int): Offset to the owner SID
+        content[3] (int): Offset to the group SID
+        content[4] (int): Offset to the DACL
+        content[5] (int): Offset to the SACL
+
+    Attributes:
+        revision_number (int): Revision number
+        control_flags (:obj:`SecurityDescriptorFlags`): Control flags
+        owner_sid_offset (int): Offset to the owner SID
+        group_sid_offset (int): Offset to the group SID
+        dacl_offset (int): Offset to the DACL
+        sacl_offset (int): Offset to the SACL
+    '''
+
     _REPR = struct.Struct("<B1xH4I")
     ''' Revision number - 1
         Padding - 1
@@ -1320,6 +1581,7 @@ class SecurityDescriptorHeader(AttributeContentRepr):
     '''
 
     def __init__(self, content=(None,)*6):
+        """Check class docstring"""
         self.revision_number, self.control_flags, self.owner_sid_offset,\
         self.group_sid_offset, self.dacl_offset, self.sacl_offset = content
 
@@ -1350,9 +1612,33 @@ class SecurityDescriptorHeader(AttributeContentRepr):
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f'(revision_number={self.revision_number}, control_flags={str(self.control_flags)}, owner_sid_offset={self.owner_sid_offset}, group_sid_offset={self.group_sid_offset}, dacl_offset={self.dacl_offset}, sacl_offset={self.sacl_offset})'
+        return f'{self.__class__.__name__}(revision_number={self.revision_number}, control_flags={str(self.control_flags)}, owner_sid_offset={self.owner_sid_offset}, group_sid_offset={self.group_sid_offset}, dacl_offset={self.dacl_offset}, sacl_offset={self.sacl_offset})'
 
 class ACEHeader(AttributeContentRepr):
+
+    '''Represents the content of a FILENAME attribute.
+
+    Aggregates the entries for timesamps when dealing with standard NTFS timestamps,
+    e.g., created, changed, mft change and accessed. All attributes are time zone
+    aware.
+
+    Note:
+        This class receives an Iterable as argument, the "Parameters/Args" section
+        represents what must be inside the Iterable. The Iterable MUST preserve
+        order or things might go boom.
+
+    Args:
+        content[0] (:obj:`datetime`): Created timestamp
+        content[1] (datetime): Changed timestamp
+        content[2] (datetime): MFT change timestamp
+        content[3] (datetime): Accessed timestamp
+
+    Attributes:
+        created (datetime): A datetime with the created timestamp
+        changed (datetime): A datetime with the changed timestamp
+        mft_changed (datetime): A datetime with the mft_changed timestamp
+        accessed (datetime): A datetime with the accessed timestamp
+    '''
     _REPR = struct.Struct("<2BH")
     ''' ACE Type - 1
         ACE Control flags - 1
@@ -1394,6 +1680,30 @@ class ACEHeader(AttributeContentRepr):
         return self.__class__.__name__ + f'(type={self.type}, control_flags={str(self.control_flags)}, ace_size={str(self.ace_size)})'
 
 class SID(AttributeContentRepr):
+
+    '''Represents the content of a FILENAME attribute.
+
+    Aggregates the entries for timesamps when dealing with standard NTFS timestamps,
+    e.g., created, changed, mft change and accessed. All attributes are time zone
+    aware.
+
+    Note:
+        This class receives an Iterable as argument, the "Parameters/Args" section
+        represents what must be inside the Iterable. The Iterable MUST preserve
+        order or things might go boom.
+
+    Args:
+        content[0] (:obj:`datetime`): Created timestamp
+        content[1] (datetime): Changed timestamp
+        content[2] (datetime): MFT change timestamp
+        content[3] (datetime): Accessed timestamp
+
+    Attributes:
+        created (datetime): A datetime with the created timestamp
+        changed (datetime): A datetime with the changed timestamp
+        mft_changed (datetime): A datetime with the mft_changed timestamp
+        accessed (datetime): A datetime with the accessed timestamp
+    '''
     _REPR = struct.Struct("<2B6s")
     ''' Revision number - 1
         Number of sub authorities - 1
@@ -1452,6 +1762,30 @@ class SID(AttributeContentRepr):
         return f'S-{self.revision_number}-{self.authority}-{sub_auths}'
 
 class BasicACE(AttributeContentRepr):
+
+    '''Represents the content of a FILENAME attribute.
+
+    Aggregates the entries for timesamps when dealing with standard NTFS timestamps,
+    e.g., created, changed, mft change and accessed. All attributes are time zone
+    aware.
+
+    Note:
+        This class receives an Iterable as argument, the "Parameters/Args" section
+        represents what must be inside the Iterable. The Iterable MUST preserve
+        order or things might go boom.
+
+    Args:
+        content[0] (:obj:`datetime`): Created timestamp
+        content[1] (datetime): Changed timestamp
+        content[2] (datetime): MFT change timestamp
+        content[3] (datetime): Accessed timestamp
+
+    Attributes:
+        created (datetime): A datetime with the created timestamp
+        changed (datetime): A datetime with the changed timestamp
+        mft_changed (datetime): A datetime with the mft_changed timestamp
+        accessed (datetime): A datetime with the accessed timestamp
+    '''
     _REPR = struct.Struct("<I")
     ''' Access rights flags - 4
         SID - n
@@ -1490,6 +1824,30 @@ class BasicACE(AttributeContentRepr):
         return self.__class__.__name__ + f'(access_rights_flags={str(self.access_rights_flags)}, sid={str(self.sid)})'
 
 class ObjectACE(AttributeContentRepr):
+
+    '''Represents the content of a FILENAME attribute.
+
+    Aggregates the entries for timesamps when dealing with standard NTFS timestamps,
+    e.g., created, changed, mft change and accessed. All attributes are time zone
+    aware.
+
+    Note:
+        This class receives an Iterable as argument, the "Parameters/Args" section
+        represents what must be inside the Iterable. The Iterable MUST preserve
+        order or things might go boom.
+
+    Args:
+        content[0] (:obj:`datetime`): Created timestamp
+        content[1] (datetime): Changed timestamp
+        content[2] (datetime): MFT change timestamp
+        content[3] (datetime): Accessed timestamp
+
+    Attributes:
+        created (datetime): A datetime with the created timestamp
+        changed (datetime): A datetime with the changed timestamp
+        mft_changed (datetime): A datetime with the mft_changed timestamp
+        accessed (datetime): A datetime with the accessed timestamp
+    '''
     _REPR = struct.Struct("<2I16s16s")
     ''' Access rights flags - 4
         Flags - 4
@@ -1537,6 +1895,30 @@ class CompoundACE():
     pass
 
 class ACE(AttributeContentNoRepr):
+
+    '''Represents the content of a FILENAME attribute.
+
+    Aggregates the entries for timesamps when dealing with standard NTFS timestamps,
+    e.g., created, changed, mft change and accessed. All attributes are time zone
+    aware.
+
+    Note:
+        This class receives an Iterable as argument, the "Parameters/Args" section
+        represents what must be inside the Iterable. The Iterable MUST preserve
+        order or things might go boom.
+
+    Args:
+        content[0] (:obj:`datetime`): Created timestamp
+        content[1] (datetime): Changed timestamp
+        content[2] (datetime): MFT change timestamp
+        content[3] (datetime): Accessed timestamp
+
+    Attributes:
+        created (datetime): A datetime with the created timestamp
+        changed (datetime): A datetime with the changed timestamp
+        mft_changed (datetime): A datetime with the mft_changed timestamp
+        accessed (datetime): A datetime with the accessed timestamp
+    '''
     _HEADER_SIZE = ACEHeader.get_representation_size()
 
     def __init__(self, content=(None,)*3):
@@ -1576,6 +1958,30 @@ class ACE(AttributeContentNoRepr):
         return self.__class__.__name__ + f"(header={self.header}, basic_ace={self.basic_ace}, object_ace={self.object_ace})"
 
 class ACL(AttributeContentRepr):
+
+    '''Represents the content of a FILENAME attribute.
+
+    Aggregates the entries for timesamps when dealing with standard NTFS timestamps,
+    e.g., created, changed, mft change and accessed. All attributes are time zone
+    aware.
+
+    Note:
+        This class receives an Iterable as argument, the "Parameters/Args" section
+        represents what must be inside the Iterable. The Iterable MUST preserve
+        order or things might go boom.
+
+    Args:
+        content[0] (:obj:`datetime`): Created timestamp
+        content[1] (datetime): Changed timestamp
+        content[2] (datetime): MFT change timestamp
+        content[3] (datetime): Accessed timestamp
+
+    Attributes:
+        created (datetime): A datetime with the created timestamp
+        changed (datetime): A datetime with the changed timestamp
+        mft_changed (datetime): A datetime with the mft_changed timestamp
+        accessed (datetime): A datetime with the accessed timestamp
+    '''
     _REPR = struct.Struct("<B1x2H2x")
     ''' Revision number - 1
         Padding - 1
@@ -1634,6 +2040,30 @@ class ACL(AttributeContentRepr):
         return self.__class__.__name__ + f'(revision_number={self.revision_number}, size={self.size}, aces_len={self.aces_len}, aces={self.aces})'
 
 class SecurityDescriptor(AttributeContentNoRepr):
+
+    '''Represents the content of a FILENAME attribute.
+
+    Aggregates the entries for timesamps when dealing with standard NTFS timestamps,
+    e.g., created, changed, mft change and accessed. All attributes are time zone
+    aware.
+
+    Note:
+        This class receives an Iterable as argument, the "Parameters/Args" section
+        represents what must be inside the Iterable. The Iterable MUST preserve
+        order or things might go boom.
+
+    Args:
+        content[0] (:obj:`datetime`): Created timestamp
+        content[1] (datetime): Changed timestamp
+        content[2] (datetime): MFT change timestamp
+        content[3] (datetime): Accessed timestamp
+
+    Attributes:
+        created (datetime): A datetime with the created timestamp
+        changed (datetime): A datetime with the changed timestamp
+        mft_changed (datetime): A datetime with the mft_changed timestamp
+        accessed (datetime): A datetime with the accessed timestamp
+    '''
     def __init__(self, content=(None,)*5):
         self.header, self.owner_sid, self.group_sid, self.sacl, self.dacl = content
 

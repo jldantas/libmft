@@ -81,7 +81,7 @@ def test_my_mft():
     mft_config = libmft.api.MFTConfig()
     mft_config.load_dataruns = False
     mft_config.load_object_id = False
-    mft_config.load_sec_desc = False
+    mft_config.load_sec_desc = True
     mft_config.load_idx_root = False
     mft_config.load_idx_alloc = False
     mft_config.load_bitmap = False
@@ -104,10 +104,10 @@ def test_my_mft():
         #print(mft[75429])
         #test_1(mft)
         for entry in mft:
-            try:
-                print(mft.get_entry_full_path(entry=entry))
-            except EntryError as e:
-                print("No available path")
+            # try:
+            #     print(mft.get_entry_full_path(entry=entry))
+            # except EntryError as e:
+            #     print("No available path")
             pass
 
 def test_botched_header():
