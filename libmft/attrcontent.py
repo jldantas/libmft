@@ -16,9 +16,6 @@ Important:
     The implementation of __len__ in the classes here is meant to return the
     size in bytes, unless otherwise mentioned.
 
-Todo:
-    * Rewrite commentaries
-
 .. moduleauthor:: Júlio Dantas <jldantas@gmail.com>
 '''
 import struct
