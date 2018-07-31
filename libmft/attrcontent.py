@@ -1600,7 +1600,7 @@ class SecurityDescriptorHeader(AttributeContentRepr):
 
     def __len__(self):
         '''Returns the logical size of the file'''
-        return cls._REPR.size
+        return SecurityDescriptorHeader._REPR.size
 
     def __eq__(self, other):
         if isinstance(other, SecurityDescriptorHeader):
@@ -1615,12 +1615,10 @@ class SecurityDescriptorHeader(AttributeContentRepr):
         return f'{self.__class__.__name__}(revision_number={self.revision_number}, control_flags={str(self.control_flags)}, owner_sid_offset={self.owner_sid_offset}, group_sid_offset={self.group_sid_offset}, dacl_offset={self.dacl_offset}, sacl_offset={self.sacl_offset})'
 
 class ACEHeader(AttributeContentRepr):
+    '''Represents header of an ACE object.
 
-    '''Represents the content of a FILENAME attribute.
-
-    Aggregates the entries for timesamps when dealing with standard NTFS timestamps,
-    e.g., created, changed, mft change and accessed. All attributes are time zone
-    aware.
+    As part of the an ACL, all ACE (Access Control Entry) have a header that
+    is represented by this class.
 
     Note:
         This class receives an Iterable as argument, the "Parameters/Args" section
@@ -1628,16 +1626,14 @@ class ACEHeader(AttributeContentRepr):
         order or things might go boom.
 
     Args:
-        content[0] (:obj:`datetime`): Created timestamp
-        content[1] (datetime): Changed timestamp
-        content[2] (datetime): MFT change timestamp
-        content[3] (datetime): Accessed timestamp
+        content[0] (:obj:`ACEType`): Type of ACE entry
+        content[1] (:obj:`ACEControlFlags`): ACE control flags
+        content[2] (int): size of the ACE entry, including the header
 
     Attributes:
-        created (datetime): A datetime with the created timestamp
-        changed (datetime): A datetime with the changed timestamp
-        mft_changed (datetime): A datetime with the mft_changed timestamp
-        accessed (datetime): A datetime with the accessed timestamp
+        type (:obj:`ACEType`): Type of ACE entry
+        control_flags (:obj:`ACEControlFlags`): ACE control flags
+        ace_size (int): size of the ACE entry, including the header
     '''
     _REPR = struct.Struct("<2BH")
     ''' ACE Type - 1
@@ -1646,6 +1642,7 @@ class ACEHeader(AttributeContentRepr):
     '''
 
     def __init__(self, content=(None,)*3):
+        """Check class docstring"""
         self.type, self.control_flags, self.ace_size = content
 
     @classmethod
@@ -1666,7 +1663,7 @@ class ACEHeader(AttributeContentRepr):
 
     def __len__(self):
         '''Returns the logical size of the file'''
-        return cls._REPR.size
+        return ACEHeader._REPR.size
 
     def __eq__(self, other):
         if isinstance(other, ACEHeader):
@@ -1677,15 +1674,15 @@ class ACEHeader(AttributeContentRepr):
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f'(type={self.type}, control_flags={str(self.control_flags)}, ace_size={str(self.ace_size)})'
+        return f'{self.__class__.__name__}(type={self.type}, control_flags={str(self.control_flags)}, ace_size={str(self.ace_size)})'
 
 class SID(AttributeContentRepr):
+    '''Represents the content of a SID object to be used by the SECURITY_DESCRIPTOR
+    attribute.
 
-    '''Represents the content of a FILENAME attribute.
+    This represents a Microsoft SID, normally seen as::
 
-    Aggregates the entries for timesamps when dealing with standard NTFS timestamps,
-    e.g., created, changed, mft change and accessed. All attributes are time zone
-    aware.
+        S-1-5-21-7623811015-3361044348-030300820-1013
 
     Note:
         This class receives an Iterable as argument, the "Parameters/Args" section
@@ -1693,16 +1690,15 @@ class SID(AttributeContentRepr):
         order or things might go boom.
 
     Args:
-        content[0] (:obj:`datetime`): Created timestamp
-        content[1] (datetime): Changed timestamp
-        content[2] (datetime): MFT change timestamp
-        content[3] (datetime): Accessed timestamp
+        content[0] (int): Revision number
+        content[1] (int): Number of sub authorities
+        content[2] (int): Authority
+        sub_authorities (list(int)): List of sub authorities
 
     Attributes:
-        created (datetime): A datetime with the created timestamp
-        changed (datetime): A datetime with the changed timestamp
-        mft_changed (datetime): A datetime with the mft_changed timestamp
-        accessed (datetime): A datetime with the accessed timestamp
+        revision_number (int): Revision number
+        authority (int): Authority
+        sub_authorities (list(int)): List of sub authorities
     '''
     _REPR = struct.Struct("<2B6s")
     ''' Revision number - 1
@@ -1712,6 +1708,7 @@ class SID(AttributeContentRepr):
     '''
 
     def __init__(self, content=(None,)*3, sub_authorities=None):
+        """Check class docstring"""
         self.revision_number, _, self.authority = content
         self.sub_authorities = sub_authorities
 
@@ -1762,12 +1759,10 @@ class SID(AttributeContentRepr):
         return f'S-{self.revision_number}-{self.authority}-{sub_auths}'
 
 class BasicACE(AttributeContentRepr):
+    '''Represents one the types of ACE entries. The Basic type.
 
-    '''Represents the content of a FILENAME attribute.
-
-    Aggregates the entries for timesamps when dealing with standard NTFS timestamps,
-    e.g., created, changed, mft change and accessed. All attributes are time zone
-    aware.
+    The Basic ACE is a very simple entry that contains the access flags for a
+    particular SID.
 
     Note:
         This class receives an Iterable as argument, the "Parameters/Args" section
@@ -1775,23 +1770,23 @@ class BasicACE(AttributeContentRepr):
         order or things might go boom.
 
     Args:
-        content[0] (:obj:`datetime`): Created timestamp
-        content[1] (datetime): Changed timestamp
-        content[2] (datetime): MFT change timestamp
-        content[3] (datetime): Accessed timestamp
+        content[0] (:obj:`ACEAccessFlags`): Access rights flags
+        content[1] (:obj:`SID`): SID
+
+        self.access_rights_flags, self.sid
 
     Attributes:
-        created (datetime): A datetime with the created timestamp
-        changed (datetime): A datetime with the changed timestamp
-        mft_changed (datetime): A datetime with the mft_changed timestamp
-        accessed (datetime): A datetime with the accessed timestamp
+        access_rights_flags (:obj:`ACEAccessFlags`): Access rights flags
+        sid (:obj:`SID`): SID
     '''
+
     _REPR = struct.Struct("<I")
     ''' Access rights flags - 4
         SID - n
     '''
 
     def __init__(self, content=(None,)*2):
+        """Check class docstring"""
         self.access_rights_flags, self.sid = content
 
     @classmethod
@@ -1811,7 +1806,7 @@ class BasicACE(AttributeContentRepr):
 
     def __len__(self):
         '''Returns the logical size of the file'''
-        return cls._REPR.size
+        return BasicACE._REPR.size
 
     def __eq__(self, other):
         if isinstance(other, BasicACE):
@@ -1824,12 +1819,11 @@ class BasicACE(AttributeContentRepr):
         return self.__class__.__name__ + f'(access_rights_flags={str(self.access_rights_flags)}, sid={str(self.sid)})'
 
 class ObjectACE(AttributeContentRepr):
+    '''Represents one the types of ACE entries. The Object type.
 
-    '''Represents the content of a FILENAME attribute.
-
-    Aggregates the entries for timesamps when dealing with standard NTFS timestamps,
-    e.g., created, changed, mft change and accessed. All attributes are time zone
-    aware.
+    This is a more complex type of ACE that contains the access flags, a group
+    of undocumented flags, the object id and its inherited object id and the SID
+    where it is applicable.
 
     Note:
         This class receives an Iterable as argument, the "Parameters/Args" section
@@ -1837,17 +1831,20 @@ class ObjectACE(AttributeContentRepr):
         order or things might go boom.
 
     Args:
-        content[0] (:obj:`datetime`): Created timestamp
-        content[1] (datetime): Changed timestamp
-        content[2] (datetime): MFT change timestamp
-        content[3] (datetime): Accessed timestamp
+        content[0] (:obj:`ACEAccessFlags`): Access rights flags
+        content[1] (int): Flags
+        content[2] (:obj:`UUID`): Object type class identifier (GUID)
+        content[3] (:obj:`UUID`): Inherited object type class identifier (GUID)
+        content[4] (:obj:`SID`): SID
 
     Attributes:
-        created (datetime): A datetime with the created timestamp
-        changed (datetime): A datetime with the changed timestamp
-        mft_changed (datetime): A datetime with the mft_changed timestamp
-        accessed (datetime): A datetime with the accessed timestamp
+        access_rights_flags (:obj:`ACEAccessFlags`): Access rights flags
+        flags (int): Flags
+        object_guid (:obj:`UUID`): Object type class identifier (GUID)
+        inherited_guid (:obj:`UUID`): Inherited object type class identifier (GUID)
+        sid (:obj:`SID`): SID
     '''
+
     _REPR = struct.Struct("<2I16s16s")
     ''' Access rights flags - 4
         Flags - 4
@@ -1857,6 +1854,7 @@ class ObjectACE(AttributeContentRepr):
     '''
 
     def __init__(self, content=(None,)*5):
+        """Check class docstring"""
         self.access_rights_flags, self.flags, self.object_guid,
         self.inherited_guid, self.sid = content
 
@@ -1877,7 +1875,7 @@ class ObjectACE(AttributeContentRepr):
 
     def __len__(self):
         '''Returns the logical size of the file'''
-        return cls._REPR.size + len(self.sid)
+        return ObjectACE._REPR.size + len(self.sid)
 
     def __eq__(self, other):
         if isinstance(other, ObjectACE):
@@ -1888,19 +1886,20 @@ class ObjectACE(AttributeContentRepr):
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f'(access_rights_flags={self.access_rights_flags}, flags={self.flags}, object_guid={self.object_guid}, inherited_guid={self.inherited_guid}, sid={self.sid})'
+        return f'{self.__class__.__name__}(access_rights_flags={self.access_rights_flags}, flags={self.flags}, object_guid={self.object_guid}, inherited_guid={self.inherited_guid}, sid={self.sid})'
 
 class CompoundACE():
     '''Nobody knows this structure'''
     pass
 
 class ACE(AttributeContentNoRepr):
+    '''Represents an ACE object.
 
-    '''Represents the content of a FILENAME attribute.
+    This class aggregates all the information about an ACE (Access Control Entry).
+    Its header, if it is an Object or Basic ACE.
 
-    Aggregates the entries for timesamps when dealing with standard NTFS timestamps,
-    e.g., created, changed, mft change and accessed. All attributes are time zone
-    aware.
+    Important:
+        The class should never have both basic ace and object ace attributes.
 
     Note:
         This class receives an Iterable as argument, the "Parameters/Args" section
@@ -1908,20 +1907,20 @@ class ACE(AttributeContentNoRepr):
         order or things might go boom.
 
     Args:
-        content[0] (:obj:`datetime`): Created timestamp
-        content[1] (datetime): Changed timestamp
-        content[2] (datetime): MFT change timestamp
-        content[3] (datetime): Accessed timestamp
+        content[0] (:obj:`ACEHeader`): Created timestamp
+        content[1] (:obj:`BasicACE`): Changed timestamp
+        content[2] (:obj:`ObjectACE`): MFT change timestamp
 
     Attributes:
-        created (datetime): A datetime with the created timestamp
-        changed (datetime): A datetime with the changed timestamp
-        mft_changed (datetime): A datetime with the mft_changed timestamp
-        accessed (datetime): A datetime with the accessed timestamp
+        header (:obj:`ACEHeader`): Created timestamp
+        basic_ace (:obj:`BasicACE`): Changed timestamp
+        object_ace (:obj:`ObjectACE`): MFT change timestamp
     '''
+
     _HEADER_SIZE = ACEHeader.get_representation_size()
 
     def __init__(self, content=(None,)*3):
+        """Check class docstring"""
         self.header, self.basic_ace, self.object_ace = content
 
     @classmethod
@@ -1937,11 +1936,9 @@ class ACE(AttributeContentNoRepr):
         elif "COMPOUND" in header.type.name:
             pass
         else:
-            #self.basic_ace = BasicACE.create_from_binary(binary_stream[cls._HEADER_SIZE:header.ace_size - cls._HEADER_SIZE])
             nw_obj.basic_ace = BasicACE.create_from_binary(binary_stream[cls._HEADER_SIZE:])
 
         return nw_obj
-
 
     def __len__(self):
         '''Returns the logical size of the file'''
@@ -1958,12 +1955,9 @@ class ACE(AttributeContentNoRepr):
         return self.__class__.__name__ + f"(header={self.header}, basic_ace={self.basic_ace}, object_ace={self.object_ace})"
 
 class ACL(AttributeContentRepr):
+    '''Represents an ACL for the SECURITY_DESCRIPTOR.
 
-    '''Represents the content of a FILENAME attribute.
-
-    Aggregates the entries for timesamps when dealing with standard NTFS timestamps,
-    e.g., created, changed, mft change and accessed. All attributes are time zone
-    aware.
+    Represents a Access Control List (ACL), which contains multiple ACE entries.
 
     Note:
         This class receives an Iterable as argument, the "Parameters/Args" section
@@ -1971,17 +1965,17 @@ class ACL(AttributeContentRepr):
         order or things might go boom.
 
     Args:
-        content[0] (:obj:`datetime`): Created timestamp
-        content[1] (datetime): Changed timestamp
-        content[2] (datetime): MFT change timestamp
-        content[3] (datetime): Accessed timestamp
+        content[0] (:obj:`datetime`): Revision number
+        content[1] (int): Size
+        content[2] (int): Number of ACE entries
+        aces (list(:obj:`ACE`)): MFT change timestamp
 
     Attributes:
-        created (datetime): A datetime with the created timestamp
-        changed (datetime): A datetime with the changed timestamp
-        mft_changed (datetime): A datetime with the mft_changed timestamp
-        accessed (datetime): A datetime with the accessed timestamp
+        revision_number[0] (:obj:`datetime`): Revision number
+        size (int): Size
+        aces (list(:obj:`ACE`)): MFT change timestamp
     '''
+
     _REPR = struct.Struct("<B1x2H2x")
     ''' Revision number - 1
         Padding - 1
@@ -1991,6 +1985,7 @@ class ACL(AttributeContentRepr):
     '''
 
     def __init__(self, content=(None,)*3, aces=None):
+        """Check class docstring"""
         self.revision_number, self.size, _ = content
         self.aces = aces
 
@@ -2037,15 +2032,15 @@ class ACL(AttributeContentRepr):
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f'(revision_number={self.revision_number}, size={self.size}, aces_len={self.aces_len}, aces={self.aces})'
+        return f'{self.__class__.__name__}(revision_number={self.revision_number}, size={self.size}, aces_len={self.aces_len}, aces={self.aces})'
 
 class SecurityDescriptor(AttributeContentNoRepr):
+    '''Represents the content of a SECURITY_DESCRIPTOR attribute.
 
-    '''Represents the content of a FILENAME attribute.
+    The Security Descriptor in Windows has a header, an owner SID and group SID, plus a
+    discretionary access control list (DACL) and a system access control list (SACL).
 
-    Aggregates the entries for timesamps when dealing with standard NTFS timestamps,
-    e.g., created, changed, mft change and accessed. All attributes are time zone
-    aware.
+    Both DACL and SACL are ACLs with the same format.
 
     Note:
         This class receives an Iterable as argument, the "Parameters/Args" section
@@ -2053,18 +2048,21 @@ class SecurityDescriptor(AttributeContentNoRepr):
         order or things might go boom.
 
     Args:
-        content[0] (:obj:`datetime`): Created timestamp
-        content[1] (datetime): Changed timestamp
-        content[2] (datetime): MFT change timestamp
-        content[3] (datetime): Accessed timestamp
+        content[0] (:obj:`SecurityDescriptorHeader`): Created timestamp
+        content[1] (:obj:`SID`): Changed timestamp
+        content[2] (:obj:`SID`): MFT change timestamp
+        content[3] (:obj:`ACL`): Accessed timestamp
+        content[4] (:obj:`ACL`): Accessed timestamp
 
     Attributes:
-        created (datetime): A datetime with the created timestamp
-        changed (datetime): A datetime with the changed timestamp
-        mft_changed (datetime): A datetime with the mft_changed timestamp
-        accessed (datetime): A datetime with the accessed timestamp
+        header (:obj:`SecurityDescriptorHeader`): Created timestamp
+        owner_sid (:obj:`SID`): Changed timestamp
+        group_sid (:obj:`SID`): MFT change timestamp
+        sacl (:obj:`ACL`): Accessed timestamp
+        dacl (:obj:`ACL`): Accessed timestamp
     '''
     def __init__(self, content=(None,)*5):
+        """Check class docstring"""
         self.header, self.owner_sid, self.group_sid, self.sacl, self.dacl = content
 
     @classmethod
@@ -2082,8 +2080,6 @@ class SecurityDescriptor(AttributeContentNoRepr):
         if header.dacl_offset:
             dacl = ACL.create_from_binary(binary_stream[header.dacl_offset:])
 
-        #if header.usage_flags & MftUsageFlags.IN_USE:
-        #acl = ACL.create_from_binary(binary_stream[header.sacl])
         nw_obj = cls((header, owner_sid, group_sid, sacl, dacl))
 
         return nw_obj
