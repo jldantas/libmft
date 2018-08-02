@@ -1,6 +1,16 @@
 # -*- coding: utf-8 -*-
-''' This module holds all flags and types as defined by the library.
-This way, we have consistent means of finding this information. (Hopefully)
+'''
+Contains all flags and standard types for MFT interpretation.
+
+This module contains a collection of structures that are necessary to interpret
+the MFT.
+
+Only definitions of those are present in this module and follows the standard:
+
+* ``enum.Enum`` - For types
+* ``enum.IntFlag`` - For flags
+
+.. moduleauthor:: Júlio Dantas <jldantas@gmail.com>
 '''
 import enum
 
@@ -187,4 +197,4 @@ class ACEAccessFlags(enum.IntFlag):
     GENERIC_READ = 0x80000000
 
 class EAFlags(enum.IntFlag):
-    NEED_EA = 0x80 
+    NEED_EA = 0x80

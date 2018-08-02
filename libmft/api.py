@@ -290,9 +290,9 @@ class MFTEntry():
         entry = cls(header, {})
 
         if header.mft_record != entry_number:
-            _MOD_LOGGER.warning(f"The MFT entry number doesn't match. {entry_number} != {header.mft_record}")
+            _MOD_LOGGER.warning("The MFT entry number doesn't match. %d != %d", entry_number, header.mft_record)
         if len(binary_data) != header.entry_alloc_len:
-            _MOD_LOGGER.error(f"Expected MFT size is different than entry size.")
+            _MOD_LOGGER.error("Expected MFT size is different than entry size.")
             raise EntryError(f"Expected MFT size ({len(binary_data)}) is different than entry size ({header.entry_alloc_len}).", binary_data, entry_number)
         if mft_config.apply_fixup_array:
             apply_fixup_array(bin_view, header.fx_offset, header.fx_count, header.entry_alloc_len)
@@ -490,7 +490,7 @@ class _MFTEntryStub():
             nw_obj.mft_record, nw_obj.seq_number, nw_obj.base_record_ref, \
             nw_obj.base_record_seq = record_n, seq_number, file_ref, file_seq
         else:
-            _MOD_LOGGER.debug(f"Entry {record_n} is empty.")
+            _MOD_LOGGER.debug("Entry %d is empty.", record_n)
 
         return nw_obj
 
@@ -734,7 +734,7 @@ class MFT():
             file_object.seek(size, 0)
             second_sig = file_object.read(4)
             if second_sig in sigs:
-                _MOD_LOGGER.info(f"MFT entry size found = {size}")
+                _MOD_LOGGER.info("MFT entry size found = %d", size)
                 break
         file_object.seek(0)
 

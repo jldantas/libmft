@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 '''
-Contains all contents for the attrbutes.
+Contains all contents for the attributes.
 
 The code here expects, as we have only the $MFT available for processing,
 contigous binary strings.
@@ -169,7 +169,8 @@ class Timestamps(AttributeContentRepr):
         nw_obj.created, nw_obj.changed, nw_obj.mft_changed, nw_obj.accessed = \
             convert_filetime(content[0]), convert_filetime(content[1]), \
             convert_filetime(content[2]), convert_filetime(content[3])
-        _MOD_LOGGER.debug(f"Timestamp created: {nw_obj}")
+        #_MOD_LOGGER.debug(f"Timestamp created: {nw_obj}")
+        _MOD_LOGGER.debug("Timestamp created: %r", nw_obj)
         _MOD_LOGGER.debug("TIMESTAMPS object created successfully")
 
         return nw_obj
@@ -185,7 +186,7 @@ class Timestamps(AttributeContentRepr):
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f'(created={self.created}, changed={self.changed}, mft_changed={self.mft_changed}, accessed={self.accessed})'
+        return f'{self.__class__.__name__}(created={self.created}, changed={self.changed}, mft_changed={self.mft_changed}, accessed={self.accessed})'
 
 #******************************************************************************
 # STANDARD_INFORMATION ATTRIBUTE
@@ -226,8 +227,10 @@ class StandardInformation(AttributeContentRepr):
     '''
     #TODO looks ugly... fix
     _TIMESTAMP_SIZE = Timestamps.get_representation_size()
-    _REPR = struct.Struct("<4I2I2Q")
-    _REPR_NO_NFTS_3_EXTENSION = struct.Struct("<4I")
+    # _REPR = struct.Struct("<4I2I2Q")
+    # _REPR_NO_NFTS_3_EXTENSION = struct.Struct("<4I")
+    _REPR = struct.Struct("<4Q4I2I2Q")
+    _REPR_NO_NFTS_3_EXTENSION = struct.Struct("<4Q4I")
     '''
         TIMESTAMPS(32)
             Creation time - 8
@@ -244,7 +247,10 @@ class StandardInformation(AttributeContentRepr):
         Update Sequence Number (USN) - 8 (NTFS 3+)
     '''
 
-    def __init__(self, content=(None,)*8):
+    __slots__ = ("timestamps", "flags", "max_n_versions", "version_number", "class_id",
+        "owner_id", "security_id", "quota_charged", "usn")
+
+    def __init__(self, content=(None,)*9):
         """Check class docstring"""
         self.timestamps, self.flags, self.max_n_versions, self.version_number, \
         self.class_id, self.owner_id,  \
@@ -255,24 +261,51 @@ class StandardInformation(AttributeContentRepr):
         """See base class."""
         return cls._TIMESTAMP_SIZE + cls._REPR.size
 
+    # @classmethod
+    # def create_from_binary(cls, binary_stream):
+    #     """See base class."""
+    #     _MOD_LOGGER.debug("Unpacking STANDARD_INFORMATION content")
+    #
+    #     timestamps = Timestamps.create_from_binary(binary_stream[:cls._TIMESTAMP_SIZE])
+    #     if len(binary_stream) == cls._TIMESTAMP_SIZE + cls._REPR.size:
+    #         _MOD_LOGGER.debug("Unpacking STDInfo with NTFS 3 extension")
+    #         main_content = cls._REPR.unpack(binary_stream[cls._TIMESTAMP_SIZE:])
+    #         nw_obj = cls(_chain((timestamps,), main_content))
+    #     else:
+    #         _MOD_LOGGER.debug("Unpacking STDInfo without NTFS 3 extension")
+    #         main_content = cls._REPR_NO_NFTS_3_EXTENSION.unpack(binary_stream[cls._TIMESTAMP_SIZE:])
+    #         nw_obj = cls(_chain((timestamps,), main_content, (None, None, None, None)))
+    #     nw_obj.flags = FileInfoFlags(nw_obj.flags)
+    #     _MOD_LOGGER.debug("StandardInformation object created successfully")
+    #
+    #     return nw_obj
+
+    ##############################
+    #change 2
     @classmethod
     def create_from_binary(cls, binary_stream):
         """See base class."""
         _MOD_LOGGER.debug("Unpacking STANDARD_INFORMATION content")
 
-        timestamps = Timestamps.create_from_binary(binary_stream[:cls._TIMESTAMP_SIZE])
-        if len(binary_stream) == cls._TIMESTAMP_SIZE + cls._REPR.size:
+        if len(binary_stream) == cls._REPR.size:
             _MOD_LOGGER.debug("Unpacking STDInfo with NTFS 3 extension")
-            main_content = cls._REPR.unpack(binary_stream[cls._TIMESTAMP_SIZE:])
-            nw_obj = cls(_chain((timestamps,), main_content))
+            t1, t2, t3, t4, a, b, c, d, e, f, g, h = cls._REPR.unpack(binary_stream)
+            nw_obj = cls((Timestamps((convert_filetime(t1), convert_filetime(t2), convert_filetime(t3), convert_filetime(t4))) , FileInfoFlags(a), b, c, d, e, f, g, h))
         else:
             _MOD_LOGGER.debug("Unpacking STDInfo without NTFS 3 extension")
-            main_content = cls._REPR_NO_NFTS_3_EXTENSION.unpack(binary_stream[cls._TIMESTAMP_SIZE:])
-            nw_obj = cls(_chain((timestamps,), main_content, (None, None, None, None)))
-        nw_obj.flags = FileInfoFlags(nw_obj.flags)
+            t1, t2, t3, t4, a, b, c, d = cls._REPR_NO_NFTS_3_EXTENSION.unpack(binary_stream)
+            nw_obj = cls((Timestamps((convert_filetime(t1), convert_filetime(t2), convert_filetime(t3), convert_filetime(t4))), FileInfoFlags(a), b, c, d, None, None, None, None))
+            # print(len(binary_stream), binary_stream.tobytes())
+            # print(nw_obj)
+
         _MOD_LOGGER.debug("StandardInformation object created successfully")
 
         return nw_obj
+
+
+
+
+
 
     def __eq__(self, other):
         if isinstance(other, StandardInformation):
@@ -428,7 +461,7 @@ class AttributeList(AttributeContentNoRepr):
             _attr_list.append(entry)
             if offset >= len(binary_view):
                 break
-            _MOD_LOGGER.debug(f"Next AttributeListEntry offset = {offset}")
+            _MOD_LOGGER.debug("Next AttributeListEntry offset = %d", offset)
         _MOD_LOGGER.debug("AttributeListEntry object created successfully")
 
         return cls(_attr_list)
@@ -663,11 +696,6 @@ class FileName(AttributeContentRepr):
         content[9] (str): Name
 
     Attributes:
-        created (datetime): A datetime with the created timestamp
-        changed (datetime): A datetime with the changed timestamp
-        mft_changed (datetime): A datetime with the mft_changed timestamp
-        accessed (datetime): A datetime with the accessed timestamp
-
         parent_ref (int): Parent refence
         parent_seq (int): Parent sequence
         timestamps (:obj:`FileInfoFlags`Timestamps): Filename timestamps
@@ -1453,7 +1481,8 @@ class EaEntry(AttributeContentRepr):
         content = cls._REPR.unpack(binary_stream[:cls._REPR.size])
         nw_obj = cls()
 
-        _MOD_LOGGER.debug(f"Creating EaEntry from binary '{binary_stream.tobytes()}'...")
+        #_MOD_LOGGER.debug(f"Creating EaEntry from binary '{binary_stream.tobytes()}'...")
+        _MOD_LOGGER.debug("Creating EaEntry from binary '%s'...", binary_stream.tobytes())
         name = binary_stream[cls._REPR.size:cls._REPR.size + content[2]].tobytes().decode("ascii")
         #it looks like the value is 8 byte aligned, do some math to compensate
         #TODO confirm if this is true
@@ -1463,7 +1492,8 @@ class EaEntry(AttributeContentRepr):
         nw_obj.offset_next_ea, nw_obj.flags, nw_obj.name, nw_obj.value = \
             content[0], EAFlags(content[1]), name, value
 
-        _MOD_LOGGER.debug(f"New EaEntry {repr(nw_obj)}")
+        #_MOD_LOGGER.debug(f"New EaEntry {repr(nw_obj)}")
+        _MOD_LOGGER.debug("New EaEntry %r", nw_obj)
 
         return nw_obj
 
@@ -1505,15 +1535,16 @@ class Ea(AttributeContentNoRepr):
         _ea_list = []
         offset = 0
 
-        _MOD_LOGGER.debug(f"Creating Ea object from binary stream {binary_stream.tobytes()}...")
+        #_MOD_LOGGER.debug(f"Creating Ea object from binary stream {binary_stream.tobytes()}...")
+        _MOD_LOGGER.debug("Creating Ea object from binary '%s'...", binary_stream.tobytes())
         while True:
             entry = EaEntry.create_from_binary(binary_stream[offset:])
             offset += entry.offset_next_ea
             _ea_list.append(entry)
             if offset >= len(binary_stream):
                 break
-            _MOD_LOGGER.debug(f"Next EaEntry offset = {offset}")
-        _MOD_LOGGER.debug(f"Ea object created successfully. {_ea_list}")
+            _MOD_LOGGER.debug("Next EaEntry offset = %d", offset)
+        _MOD_LOGGER.debug("Ea object created successfully.")
 
         return cls(_ea_list)
 
@@ -2008,7 +2039,7 @@ class ACL(AttributeContentRepr):
             ace = ACE.create_from_binary(binary_stream[offset:])
             offset += len(ace)
             aces.append(ace)
-            _MOD_LOGGER.debug(f"Next ACE offset = {offset}")
+            _MOD_LOGGER.debug("Next ACE offset = %d", offset)
 
         if len(aces) != content[2]:
             raise ContentError("Number of processed ACE entries different than expected.")

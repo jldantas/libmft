@@ -75,13 +75,13 @@ def stress_ads(mft_config):
         print(entry_n, mft.get_full_path(entry_n), mft[entry_n].get_names(), mft[entry_n].get_datastream_names())
 
 def test_my_mft():
-    test = "../../MFT_C.bin"
+    #test = "../../MFT_C.bin"
     #test = "../../my_mft.bin"
-    #test = "c:/cases/my_mft.bin"
+    test = "c:/cases/my_mft.bin"
     mft_config = libmft.api.MFTConfig()
     mft_config.load_dataruns = False
     mft_config.load_object_id = False
-    mft_config.load_sec_desc = True
+    mft_config.load_sec_desc = False
     mft_config.load_idx_root = False
     mft_config.load_idx_alloc = False
     mft_config.load_bitmap = False
