@@ -25,6 +25,8 @@ from operator import getitem as _getitem
 from uuid import UUID
 from abc import ABCMeta, abstractmethod
 from math import ceil as _ceil
+import sys as _sys
+import types
 
 from libmft.util.functions import convert_filetime, get_file_reference
 from libmft.flagsandtypes import AttrTypes, NameType, FileInfoFlags, \
@@ -95,98 +97,236 @@ class AttributeContentRepr(AttributeContentBase):
         pass
 
 #******************************************************************************
-# TIMESTAMPS class
+# Class factory helper
 #******************************************************************************
-class Timestamps(AttributeContentRepr):
-    '''Represents a group of timestamps based on how MFT records.
+#TODO move this to some other place?
+def _create_attrcontent_class(name, fields, inheritance=(object,), data_structure=None, extra_functions=None):
+    '''
+    name - str
+    fields - tuple of str
 
-    Aggregates the entries for timesamps when dealing with standard NTFS timestamps,
-    e.g., created, changed, mft change and accessed. All attributes are time zone
-    aware.
-
-    Note:
-        This class receives an Iterable as argument, the "Parameters/Args" section
-        represents what must be inside the Iterable. The Iterable MUST preserve
-        order or things might go boom.
-
-    Args:
-        content[0] (:obj:`datetime`): Created timestamp
-        content[1] (datetime): Changed timestamp
-        content[2] (datetime): MFT change timestamp
-        content[3] (datetime): Accessed timestamp
-
-    Attributes:
-        created (datetime): A datetime with the created timestamp
-        changed (datetime): A datetime with the changed timestamp
-        mft_changed (datetime): A datetime with the mft_changed timestamp
-        accessed (datetime): A datetime with the accessed timestamp
     '''
 
-    _REPR = struct.Struct("<4Q")
+    def create_func_from_str(f_name, args, content, docstring=""):
+        '''Helper function to create functions from strings.
 
-    def __init__(self, content=(None,)*4):
-        """Check class docstring"""
-        self.created, self.changed, self.mft_changed, self.accessed = content
+        f_name - str
+        args - list of str
+        content - str
+        docstring - str
+        '''
+        exec_namespace = {"__name__" : f"{f_name}"}
+        new_args = ", ".join(["self"] + args)
+        func_str = f"def {f_name}({new_args}): {content}"
+        exec(func_str, exec_namespace)
+        func = exec_namespace[f_name]
+        func.__doc__ = docstring
 
-    def astimezone(self, timezone):
-        """Changes the time zones of all timestamps.
+        return func
 
-        Receives a new timezone and applies to all timestamps, if necessary.
+    #creates the functions necessary for the new class
+    slots = fields
 
-        Args:
-            timezone (:obj:`tzinfo`): Time zone to be applied
+    init_content = ", ".join([f"self.{field}" for field in fields]) + " = content"
+    __init__ = create_func_from_str("__init__", [f"content=(None,)*{len(fields)}"],  init_content)
 
-        Returns:
-            A new ``Timestamps`` object if the time zone changes, otherwise returns ``self``.
-        """
-        if self.created.tzinfo is timezone:
-            return self
-        else:
-            nw_obj = cls((None,)*4)
-            nw_obj.created = self.created.astimezone(timezone)
-            nw_obj.changed = self.changed.astimezone(timezone)
-            nw_obj.mft_changed = self.mft_changed.astimezone(timezone)
-            nw_obj.accessed = self.accessed.astimezone(timezone)
+    temp = ", ".join([f"{field}={{self.{field}}}" for field in fields])
+    repr = "return " + f"f\'{{self.__class__.__name__}}({temp})\'"
+    __repr__ = create_func_from_str("__repr__", [],  repr)
 
-            return nw_obj
+    temp = " and ".join([f"self.{field} == other.{field}" for field in fields])
+    eq = f"return {temp} if isinstance(other, {name}) else False"
+    __eq__ = create_func_from_str("__eq__", ["other"], eq)
 
     @classmethod
     def get_representation_size(cls):
-        """See base class."""
         return cls._REPR.size
 
-    @classmethod
-    def create_from_binary(cls, binary_stream):
-        """See base class."""
-        repr = cls._REPR
+    #adapted from namedtuple code
+    # Modify function metadata to help with introspection and debugging
+    for method in (__init__, get_representation_size.__func__, __eq__,
+                   __repr__):
+        method.__qualname__ = f'{name}.{method.__name__}'
 
-        if len(binary_stream) != repr.size:
-            raise ContentError("Invalid binary stream size")
+    #map class namespace for the class creation
+    namespace = {"__slots__" : slots,
+                 "__init__" : __init__,
+                 "__repr__" : __repr__,
+                 "__eq__" : __eq__
+                 }
+    if data_structure is not None:
+        namespace["_REPR"] = struct.Struct(data_structure)
+        namespace["get_representation_size"] = get_representation_size
+    #some new mappings can be set or overload the ones defined
+    if extra_functions is not None:
+        for method in extra_functions.values():
+            try:
+                method.__qualname__ = f'{name}.{method.__name__}'
+            except AttributeError:
+                method.__func__.__qualname__ = f'{name}.{method.__func__.__name__}'
+        namespace = {**namespace, **extra_functions}
 
-        _MOD_LOGGER.debug("Unpacking TIMESTAMPS content")
-        content = repr.unpack(binary_stream)
-        nw_obj = cls()
-        nw_obj.created, nw_obj.changed, nw_obj.mft_changed, nw_obj.accessed = \
-            convert_filetime(content[0]), convert_filetime(content[1]), \
-            convert_filetime(content[2]), convert_filetime(content[3])
-        #_MOD_LOGGER.debug(f"Timestamp created: {nw_obj}")
-        _MOD_LOGGER.debug("Timestamp created: %r", nw_obj)
-        _MOD_LOGGER.debug("TIMESTAMPS object created successfully")
+    #TODO check if docstring was provided, issue a warning
+
+    new_class = type(name, inheritance, namespace)
+
+    # adapted from namedtuple code
+    # For pickling to work, the __module__ variable needs to be set to the frame
+    # where the named tuple is created.  Bypass this step in environments where
+    # sys._getframe is not defined (Jython for example) or sys._getframe is not
+    # defined for arguments greater than 0 (IronPython), or where the user has
+    # specified a particular module.
+    try:
+        new_class.__module__ = _sys._getframe(1).f_globals.get('__name__', '__main__')
+    except (AttributeError, ValueError):
+        pass
+
+    return new_class
+
+#******************************************************************************
+# TIMESTAMPS class
+#******************************************************************************
+def _len_ts(self):
+    return Timestamps._REPR.size
+
+def _from_binary_ts(cls, binary_stream):
+    """See base class."""
+    repr = cls._REPR
+
+    if len(binary_stream) != repr.size:
+        raise ContentError("Invalid binary stream size")
+
+    _MOD_LOGGER.debug("Unpacking TIMESTAMPS content")
+    content = repr.unpack(binary_stream)
+    nw_obj = cls()
+    nw_obj.created, nw_obj.changed, nw_obj.mft_changed, nw_obj.accessed = \
+        convert_filetime(content[0]), convert_filetime(content[1]), \
+        convert_filetime(content[2]), convert_filetime(content[3])
+    #_MOD_LOGGER.debug(f"Timestamp created: {nw_obj}")
+    _MOD_LOGGER.debug("Timestamp created: %r", nw_obj)
+    _MOD_LOGGER.debug("TIMESTAMPS object created successfully")
+
+    return nw_obj
+
+def _astimezone_ts(self, timezone):
+    """Changes the time zones of all timestamps.
+
+    Receives a new timezone and applies to all timestamps, if necessary.
+
+    Args:
+        timezone (:obj:`tzinfo`): Time zone to be applied
+
+    Returns:
+        A new ``Timestamps`` object if the time zone changes, otherwise returns ``self``.
+    """
+    if self.created.tzinfo is timezone:
+        return self
+    else:
+        nw_obj = cls((None,)*4)
+        nw_obj.created = self.created.astimezone(timezone)
+        nw_obj.changed = self.changed.astimezone(timezone)
+        nw_obj.mft_changed = self.mft_changed.astimezone(timezone)
+        nw_obj.accessed = self.accessed.astimezone(timezone)
 
         return nw_obj
 
-    def __eq__(self, other):
-        if isinstance(other, Timestamps):
-            return self.created == other.created and self.changed == other.changed \
-                and self.mft_changed == other.mft_changed and self.accessed == other.accessed
-        return False
+_ts_namespace = {"__len__" : _len_ts,
+                 "create_from_binary" : classmethod(_from_binary_ts),
+                 "astimezone" : _astimezone_ts}
+Timestamps = _create_attrcontent_class("Timestamps", ("created", "changed", "mft_changed", "accessed"),
+                data_structure="<4Q", extra_functions=_ts_namespace)
 
-    def __len__(self):
-        return Timestamps._REPR.size
 
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return f'{self.__class__.__name__}(created={self.created}, changed={self.changed}, mft_changed={self.mft_changed}, accessed={self.accessed})'
+# class Timestamps(AttributeContentRepr):
+#     '''Represents a group of timestamps based on how MFT records.
+#
+#     Aggregates the entries for timesamps when dealing with standard NTFS timestamps,
+#     e.g., created, changed, mft change and accessed. All attributes are time zone
+#     aware.
+#
+#     Note:
+#         This class receives an Iterable as argument, the "Parameters/Args" section
+#         represents what must be inside the Iterable. The Iterable MUST preserve
+#         order or things might go boom.
+#
+#     Args:
+#         content[0] (:obj:`datetime`): Created timestamp
+#         content[1] (datetime): Changed timestamp
+#         content[2] (datetime): MFT change timestamp
+#         content[3] (datetime): Accessed timestamp
+#
+#     Attributes:
+#         created (datetime): A datetime with the created timestamp
+#         changed (datetime): A datetime with the changed timestamp
+#         mft_changed (datetime): A datetime with the mft_changed timestamp
+#         accessed (datetime): A datetime with the accessed timestamp
+#     '''
+#
+#     _REPR = struct.Struct("<4Q")
+#
+#     def __init__(self, content=(None,)*4):
+#         """Check class docstring"""
+#         self.created, self.changed, self.mft_changed, self.accessed = content
+#
+#     def astimezone(self, timezone):
+#         """Changes the time zones of all timestamps.
+#
+#         Receives a new timezone and applies to all timestamps, if necessary.
+#
+#         Args:
+#             timezone (:obj:`tzinfo`): Time zone to be applied
+#
+#         Returns:
+#             A new ``Timestamps`` object if the time zone changes, otherwise returns ``self``.
+#         """
+#         if self.created.tzinfo is timezone:
+#             return self
+#         else:
+#             nw_obj = cls((None,)*4)
+#             nw_obj.created = self.created.astimezone(timezone)
+#             nw_obj.changed = self.changed.astimezone(timezone)
+#             nw_obj.mft_changed = self.mft_changed.astimezone(timezone)
+#             nw_obj.accessed = self.accessed.astimezone(timezone)
+#
+#             return nw_obj
+#
+#     @classmethod
+#     def get_representation_size(cls):
+#         """See base class."""
+#         return cls._REPR.size
+#
+#     @classmethod
+#     def create_from_binary(cls, binary_stream):
+#         """See base class."""
+#         repr = cls._REPR
+#
+#         if len(binary_stream) != repr.size:
+#             raise ContentError("Invalid binary stream size")
+#
+#         _MOD_LOGGER.debug("Unpacking TIMESTAMPS content")
+#         content = repr.unpack(binary_stream)
+#         nw_obj = cls()
+#         nw_obj.created, nw_obj.changed, nw_obj.mft_changed, nw_obj.accessed = \
+#             convert_filetime(content[0]), convert_filetime(content[1]), \
+#             convert_filetime(content[2]), convert_filetime(content[3])
+#         #_MOD_LOGGER.debug(f"Timestamp created: {nw_obj}")
+#         _MOD_LOGGER.debug("Timestamp created: %r", nw_obj)
+#         _MOD_LOGGER.debug("TIMESTAMPS object created successfully")
+#
+#         return nw_obj
+#
+#     def __eq__(self, other):
+#         if isinstance(other, Timestamps):
+#             return self.created == other.created and self.changed == other.changed \
+#                 and self.mft_changed == other.mft_changed and self.accessed == other.accessed
+#         return False
+#
+#     def __len__(self):
+#         return Timestamps._REPR.size
+#
+#     def __repr__(self):
+#         'Return a nicely formatted representation string'
+#         return f'{self.__class__.__name__}(created={self.created}, changed={self.changed}, mft_changed={self.mft_changed}, accessed={self.accessed})'
 
 #******************************************************************************
 # STANDARD_INFORMATION ATTRIBUTE
@@ -296,7 +436,8 @@ class StandardInformation(AttributeContentRepr):
             t1, t2, t3, t4, a, b, c, d = cls._REPR_NO_NFTS_3_EXTENSION.unpack(binary_stream)
             nw_obj = cls((Timestamps((convert_filetime(t1), convert_filetime(t2), convert_filetime(t3), convert_filetime(t4))), FileInfoFlags(a), b, c, d, None, None, None, None))
             # print(len(binary_stream), binary_stream.tobytes())
-            # print(nw_obj)
+
+        #print(nw_obj)
 
         _MOD_LOGGER.debug("StandardInformation object created successfully")
 
