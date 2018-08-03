@@ -427,7 +427,7 @@ def _from_binary_attrlist_e(cls, binary_stream):
 
     return nw_obj
 
-def _len_stdinfo_attrlist_e(self):
+def _len_attrlist_e(self):
     '''Returns the size of the entry, in bytes'''
     return self._entry_len
 
@@ -462,7 +462,7 @@ Attributes:
     name (int): Name
 '''
 
-_attrlist_e_namespace = {"__len__" : _len_stdinfo_attrlist_e,
+_attrlist_e_namespace = {"__len__" : _len_attrlist_e,
                  "create_from_binary" : classmethod(_from_binary_attrlist_e)
                  }
 
@@ -472,124 +472,115 @@ AttributeListEntry = _create_attrcontent_class("AttributeListEntry",
         inheritance=(AttributeContentRepr,), data_structure="<IH2B2QH",
         extra_functions=_attrlist_e_namespace, docstring=_docstring_attrlist_e)
 
-class AttributeList(AttributeContentNoRepr):
-    '''Represents the contents for the ATTRIBUTE_LIST attribute.
+#-----------------------------------------------------------------------------
 
-    Is a list of AttributeListEntry. It behaves as list in python, you can iterate
-    over it, access by member, etc.
+def _from_binary_attrlist(cls, binary_stream):
+    """See base class."""
+    _attr_list = []
+    offset = 0
 
-    Important:
-        Using the ``len()`` method on the objects of this class returns the number
-        of elements in the list.
+    while True:
+        entry = AttributeListEntry.create_from_binary(binary_stream[offset:])
+        offset += len(entry)
+        _attr_list.append(entry)
+        if offset >= len(binary_stream):
+            break
+        _MOD_LOGGER.debug("Next AttributeListEntry offset = %d", offset)
+    _MOD_LOGGER.debug("Attempted to unpack ATTRIBUTE_LIST Entry from \"%s\"\nResult: %s", binary_stream.tobytes(), _attr_list)
 
-    Args:
-        content (list(:obj:`AttributeListEntry`)): List of AttributeListEntry
-    '''
+    return cls(_attr_list)
 
-    def __init__(self, content=[]):
-        """Check class docstring"""
-        self._attr_list = content
+def _len_attrlist(self):
+    '''Return the number of entries in the attribute list'''
+    return len(self._attr_list)
 
-    @classmethod
-    def create_from_binary(cls, binary_view):
-        """See base class."""
-        _attr_list = []
-        offset = 0
+def _iter_attrlist(self):
+    return iter(self._attr_list)
 
-        while True:
-            _MOD_LOGGER.debug("Creating AttributeListEntry object from binary stream...")
-            entry = AttributeListEntry.create_from_binary(binary_view[offset:])
-            offset += len(entry)
-            _attr_list.append(entry)
-            if offset >= len(binary_view):
-                break
-            _MOD_LOGGER.debug("Next AttributeListEntry offset = %d", offset)
-        _MOD_LOGGER.debug("AttributeListEntry object created successfully")
+def _gitem_attrlist(self, index):
+    return _getitem(self._attr_list, index)
 
-        return cls(_attr_list)
+_docstring_attrlist = '''Represents the contents for the ATTRIBUTE_LIST attribute.
 
-    def __len__(self):
-        '''Return the number of entries in the attribute list'''
-        return len(self._attr_list)
+Is a list of AttributeListEntry. It behaves as list in python, you can iterate
+over it, access by member, etc.
 
-    def __iter__(self):
-        '''Return the iterator for the representation of the list, so it is
-        easier to check everything'''
-        return iter(self._attr_list)
+Important:
+    Using the ``len()`` method on the objects of this class returns the number
+    of elements in the list.
 
-    def __getitem__(self, index):
-        '''Return the AttributeListEntry at the specified position'''
-        return _getitem(self._attr_list, index)
+Args:
+    content (list(:obj:`AttributeListEntry`)): List of AttributeListEntry
+'''
 
-    def __eq__(self, other):
-        if isinstance(other, AttributeList):
-            return self._attr_list == other._attr_list
-        return False
+_attrlist_namespace = {"__len__" : _len_attrlist,
+                       "__iter__" : _iter_attrlist,
+                       "__getitem__" : _gitem_attrlist,
+                       "create_from_binary" : classmethod(_from_binary_attrlist)
+                 }
 
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f'(_attr_list={self._attr_list})'
+AttributeList = _create_attrcontent_class("AttributeList",
+            ("_attr_list",),
+        inheritance=(AttributeContentNoRepr,), data_structure=None,
+        extra_functions=_attrlist_namespace, docstring=_docstring_attrlist)
 
 #******************************************************************************
 # OBJECT_ID ATTRIBUTE
 #******************************************************************************
-class ObjectID(AttributeContentNoRepr):
-    '''Represents the content of the OBJECT_ID attribute.
+def _from_binary_objid(cls, binary_stream):
+    """See base class."""
+    uid_size = ObjectID._UUID_SIZE
 
-    Important:
-        When reading from binary, some entries may not have all the members,
-        in this case the code creates None entries.
+    #some entries might not have all four ids, this line forces
+    #to always create 4 elements, so contruction is easier
+    uids = [UUID(bytes_le=binary_stream[i*uid_size:(i+1)*uid_size].tobytes()) if i * uid_size < len(binary_stream) else None for i in range(0,4)]
+    _MOD_LOGGER.debug("Attempted to unpack OBJECT_ID Entry from \"%s\"\nResult: %s", binary_stream.tobytes(), uids)
 
-    Note:
-        This class receives an Iterable as argument, the "Parameters/Args" section
-        represents what must be inside the Iterable. The Iterable MUST preserve
-        order or things might go boom.
+    return cls(uids)
 
-    Args:
-        content[0] (:obj:`UUID`): Object id
-        content[1] (:obj:`UUID`): Birth volume id
-        content[2] (:obj:`UUID`): Birth object id
-        content[3] (:obj:`UUID`): Birth domain id
-
-    Attributes:
-        object_id (UUID): Unique ID assigned to file
-        birth_vol_id (UUID): ID of the volume where the file was created
-        birth_object_id (UUID): Original Object ID of the file
-        birth_domain_id (UUID): Domain where the object was created
-    '''
-    _UUID_SIZE = 16
-
-    def __init__(self,  content=(None,)*4):
-        """Check class docstring"""
-        self.object_id, self.birth_vol_id, self.birth_object_id, \
-        self.birth_domain_id = content
-        self._size = sum([ObjectID._UUID_SIZE for data in content if content is not None])
-
-    @classmethod
-    def create_from_binary(cls, binary_view):
-        """See base class."""
-        uid_size = ObjectID._UUID_SIZE
-
-        #some entries might not have all four ids, this line forces
-        #to always create 4 elements, so contruction is easier
-        uids = [UUID(bytes_le=binary_view[i*uid_size:(i+1)*uid_size].tobytes()) if i * uid_size < len(binary_view) else None for i in range(0,4)]
-        _MOD_LOGGER.debug("ObjectID object created successfully")
-
-        return cls(uids)
-
-    def __len__(self):
-        '''Get the actual size of the content, as some attributes have variable sizes'''
+def _len_objid(self):
+    '''Get the actual size of the content, as some attributes have variable sizes'''
+    try:
+        return self._size
+    except AttributeError:
+        temp = (self.object_id, self.birth_vol_id, self.birth_object_id, self.birth_domain_id)
+        self._size = sum([ObjectID._UUID_SIZE for data in temp if data is not None])
         return self._size
 
-    def __eq__(self, other):
-        if isinstance(other, ObjectID):
-            return self.object_id == other.object_id and self.birth_vol_id == other.birth_vol_id \
-                and self.birth_object_id == other.birth_object_id and self.birth_domain_id == other.birth_domain_id
-        return False
+_docstring_objid = '''Represents the content of the OBJECT_ID attribute.
 
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f'(object_id={self.object_id}, birth_vol_id={self.birth_vol_id}, birth_object_id={self.birth_object_id}, birth_domain_id={self.birth_domain_id})'
+Important:
+    When reading from binary, some entries may not have all the members,
+    in this case the code creates None entries.
+
+Note:
+    This class receives an Iterable as argument, the "Parameters/Args" section
+    represents what must be inside the Iterable. The Iterable MUST preserve
+    order or things might go boom.
+
+Args:
+    content[0] (:obj:`UUID`): Object id
+    content[1] (:obj:`UUID`): Birth volume id
+    content[2] (:obj:`UUID`): Birth object id
+    content[3] (:obj:`UUID`): Birth domain id
+
+Attributes:
+    object_id (UUID): Unique ID assigned to file
+    birth_vol_id (UUID): ID of the volume where the file was created
+    birth_object_id (UUID): Original Object ID of the file
+    birth_domain_id (UUID): Domain where the object was created
+'''
+
+_objid_namespace = {"__len__" : _len_objid,
+                       "_UUID_SIZE" : 16,
+                       "create_from_binary" : classmethod(_from_binary_objid)
+                 }
+
+ObjectID = _create_attrcontent_class("ObjectID",
+            ("object_id", "birth_vol_id", "birth_object_id", "birth_domain_id"),
+        inheritance=(AttributeContentNoRepr,), data_structure=None,
+        extra_functions=_objid_namespace, docstring=_docstring_objid)
+
 
 #******************************************************************************
 # VOLUME_NAME ATTRIBUTE
