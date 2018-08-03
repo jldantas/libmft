@@ -585,163 +585,89 @@ ObjectID = _create_attrcontent_class("ObjectID",
 #******************************************************************************
 # VOLUME_NAME ATTRIBUTE
 #******************************************************************************
-class VolumeName(AttributeContentNoRepr):
-    """Represents the content of the VOLUME_NAME attribute.
+def _from_binary_volname(cls, binary_stream):
+    """See base class."""
+    name = binary_stream.tobytes().decode("utf_16_le")
 
-    Args:
-        name (str): Volume's name
+    _MOD_LOGGER.debug("Attempted to unpack VOLUME_NAME Entry from \"%s\"\nResult: %s", binary_stream.tobytes(), name)
 
-    Attributes:
-        name (str): Volume's name
-    """
+    return cls(name)
 
-    def __init__(self, name):
-        """Check class docstring"""
-        self.name = name
+def _len_volname(self):
+    """Returns the size of the attribute, in bytes, encoded in utf_16_le"""
+    return len(self.name.encode("utf_16_le"))
 
-    def _get_name_length(self):
-        """int: Returns the length of the name based on the name"""
-        if self.name is None:
-            return 0
-        else:
-            return len(self.name)
+_docstring_volname = """Represents the content of the VOLUME_NAME attribute.
 
-    #the name length can derived from the name, so, we don't need to keep in memory
-    name_len = property(_get_name_length, doc='Length of the name')
+Args:
+    name (str): Volume's name
 
-    @classmethod
-    def create_from_binary(cls, binary_view):
-        """See base class."""
-        name = binary_view.tobytes().decode("utf_16_le")
-        _MOD_LOGGER.debug("ObjectID object created successfully")
+Attributes:
+    name (str): Volume's name
+"""
 
-        return cls(name)
+_volname_namespace = {"__len__" : _len_volname,
+                       "create_from_binary" : classmethod(_from_binary_volname)
+                 }
 
-    def __len__(self):
-        """Returns the size of the attribute, in bytes, encoded in utf_16_le"""
-        return len(self.name.encode("utf_16_le"))
-
-    def __eq__(self, other):
-        if isinstance(other, VolumeName):
-            return self.name == other.name
-        return False
-
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f'(name={self.name})'
+VolumeName = _create_attrcontent_class("VolumeName",
+            ("name", ),
+        inheritance=(AttributeContentNoRepr,), data_structure=None,
+        extra_functions=_volname_namespace, docstring=_docstring_volname)
 
 #******************************************************************************
 # VOLUME_INFORMATION ATTRIBUTE
 #******************************************************************************
-class VolumeInformation(AttributeContentRepr):
-    '''Represents the content of the VOLUME_INFORMATION attribute
+def _from_binary_volinfo(cls, binary_stream):
+    """See base class."""
+    content = cls._REPR.unpack(binary_stream)
 
-    Interprets the volume information as per viewed by MFT. Contains information
-    like version and the state of the volume.
+    nw_obj = cls(content)
+    nw_obj.vol_flags = VolumeFlags(content[2])
 
-    Note:
-        This class receives an Iterable as argument, the "Parameters/Args" section
-        represents what must be inside the Iterable. The Iterable MUST preserve
-        order or things might go boom.
+    _MOD_LOGGER.debug("Attempted to unpack VOLUME_INFORMATION Entry from \"%s\"\nResult: %s", binary_stream.tobytes(), content)
 
-    Args:
-        content[0] (int): Major version
-        content[1] (int): Minor version
-        content[2] (:obj:`VolumeFlags`): Volume flags
+    return nw_obj
 
-    Attributes:
-        major_ver (int): Major version
-        minor_ver (int): Minor version
-        vol_flags (:obj:`VolumeFlags`): Volume flags
-    '''
+def _len_volinfo(self):
+    '''Returns the length of the attribute'''
+    return VolumeInformation._REPR.size
 
-    _REPR = struct.Struct("<8x2BH")
-    ''' Unknow - 8
-        Major version number - 1
-        Minor version number - 1
-        Volume flags - 2
-    '''
+_docstring_volinfo = '''Represents the content of the VOLUME_INFORMATION attribute
 
-    def __init__(self, content=(None,)*3):
-        """Check class docstring"""
-        self.major_ver, self.minor_ver, self.vol_flags = content
+Interprets the volume information as per viewed by MFT. Contains information
+like version and the state of the volume.
 
-    @classmethod
-    def get_representation_size(cls):
-        """See base class."""
-        return cls._REPR.size
+Note:
+    This class receives an Iterable as argument, the "Parameters/Args" section
+    represents what must be inside the Iterable. The Iterable MUST preserve
+    order or things might go boom.
 
-    @classmethod
-    def create_from_binary(cls, binary_view):
-        """See base class."""
-        content = cls._REPR.unpack(binary_view)
+Args:
+    content[0] (int): Major version
+    content[1] (int): Minor version
+    content[2] (:obj:`VolumeFlags`): Volume flags
 
-        nw_obj = cls(content)
-        nw_obj.vol_flags = VolumeFlags(content[2])
-        _MOD_LOGGER.debug("VolumeInformation object created successfully")
+Attributes:
+    major_ver (int): Major version
+    minor_ver (int): Minor version
+    vol_flags (:obj:`VolumeFlags`): Volume flags
+'''
 
-        return nw_obj
+_volinfo_namespace = {"__len__" : _len_volinfo,
+                       "create_from_binary" : classmethod(_from_binary_volinfo)
+                 }
 
-    def __len__(self):
-        '''Returns the length of the attribute'''
-        return VolumeInformation._REPR.size
-
-    def __eq__(self, other):
-        if isinstance(other, VolumeInformation):
-            return self.major_ver == other.major_ver and self.minor_ver == other.minor_ver \
-                    and self.vol_flags == other.vol_flags
-        return False
-
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f'(major_ver={self.major_ver}, minor_ver={self.minor_ver}, vol_flags={self.vol_flags})'
+VolumeInformation = _create_attrcontent_class("VolumeInformation",
+            ("major_ver", "minor_ver", "vol_flags"),
+        inheritance=(AttributeContentRepr,), data_structure="<8x2BH",
+        extra_functions=_volinfo_namespace, docstring=_docstring_volinfo)
 
 #******************************************************************************
 # FILENAME ATTRIBUTE
 #******************************************************************************
-class FileName(AttributeContentRepr):
-    '''Represents the content of a FILENAME attribute.
-
-    The FILENAME attribute is one of the most important for MFT. It is not a mandatory
-    field, but if present, holds multiple timestamps, flags of the file and the name
-    of the file. It may be present multiple times.
-
-    Warning:
-        The information related to "allocated file size" and "real file size"
-        in this attribute is NOT reliable. Blame Microsoft. If you want a more
-        reliable information, use the ``Datastream`` objects in the api module.
-
-    Note:
-        This class receives an Iterable as argument, the "Parameters/Args" section
-        represents what must be inside the Iterable. The Iterable MUST preserve
-        order or things might go boom.
-
-    Args:
-        content[0] (int): Parent reference
-        content[1] (int): Parent sequence
-        content[2] (:obj:`Timestamps`): Filename timestamps
-        content[3] (int): Allocated size of the file
-        content[4] (int): Logica/Real file size
-        content[5] (:obj:`FileInfoFlags`): File flags
-        content[6] (int): Reparse value
-        content[7] (int): Name length
-        content[8] (:obj:`NameType`): Name type
-        content[9] (str): Name
-
-    Attributes:
-        parent_ref (int): Parent refence
-        parent_seq (int): Parent sequence
-        timestamps (:obj:`FileInfoFlags`Timestamps): Filename timestamps
-        alloc_file_size (int): Allocated size of the file
-        real_file_size (int): Logica/Real file size
-        flags (:obj:`FileInfoFlags`): File flags
-        reparse_value (int): Reparse value
-        name_type (:obj:`NameType`): Name type
-        name (str): Name
-    '''
-
-    _TIMESTAMP_SIZE = Timestamps.get_representation_size() #TODO looks ugly... fix
-    _REPR = struct.Struct("<1Q32x2Q2I2B")
+def _from_binary_filename(cls, binary_stream):
+    """See base class."""
     ''' File reference to parent directory - 8
         TIMESTAMPS(32)
             Creation time - 8
@@ -757,58 +683,72 @@ class FileName(AttributeContentRepr):
         Name - variable
     '''
 
-    def __init__(self, content=(None, )*10):
-        """Check class docstring"""
-        self.parent_ref, self.parent_seq, self.timestamps, self.alloc_file_size, \
-        self.real_file_size, self.flags, self.reparse_value, _, self.name_type, \
-        self.name = content
+    f_tag, t_created, t_changed, t_mft_changed, t_accessed, alloc_fsize, \
+        real_fsize, flags, reparse_value, name_len, name_type = cls._REPR.unpack(binary_stream[:cls._REPR.size])
+    name = binary_stream[cls._REPR.size:].tobytes().decode("utf_16_le")
+    file_ref, file_seq = get_file_reference(f_tag)
 
-    def _get_name_len(self):
-        """int: Returns the length of the name based on the name"""
-        return len(self.name)
+    nw_obj = cls((file_ref, file_seq,
+           Timestamps((convert_filetime(t_created), convert_filetime(t_changed),
+                        convert_filetime(t_mft_changed), convert_filetime(t_accessed))
+        ), alloc_fsize, real_fsize, FileInfoFlags(flags), reparse_value, NameType(name_type), name))
 
-    #the name length can derived from the name, so, we don't need to keep in memory
-    name_len = property(_get_name_len, doc='Length of the name')
+    _MOD_LOGGER.debug("Attempted to unpack FILENAME from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
 
-    @classmethod
-    def get_representation_size(cls):
-        """See base class."""
-        return cls._REPR.size
+    return nw_obj
 
-    @classmethod
-    def create_from_binary(cls, binary_view):
-        """See base class."""
-        nw_obj = cls()
-        content = cls._REPR.unpack(binary_view[:cls._REPR.size])
-        name = binary_view[cls._REPR.size:].tobytes().decode("utf_16_le")
-        timestamps = Timestamps.create_from_binary(binary_view[8:8+cls._TIMESTAMP_SIZE])
-        file_ref, file_seq = get_file_reference(content[0])
+def _len_filename(self):
+    return  FileName._REPR.size + len(name.encode("utf_16_le"))
 
-        nw_obj.parent_ref, nw_obj.parent_seq, nw_obj.timestamps, nw_obj.alloc_file_size, \
-        nw_obj.real_file_size, nw_obj.flags, nw_obj.reparse_value, nw_obj.name_type, \
-        nw_obj.name = \
-        file_ref, file_seq, timestamps, content[1], content[2], FileInfoFlags(content[3]),  \
-        content[4], NameType(content[6]), name
+_docstring_filename = '''Represents the content of a FILENAME attribute.
 
-        return nw_obj
+The FILENAME attribute is one of the most important for MFT. It is not a mandatory
+field, but if present, holds multiple timestamps, flags of the file and the name
+of the file. It may be present multiple times.
 
-    def __eq__(self, other):
-        if isinstance(other, FileName):
-            return self.parent_ref == other.parent_ref and self.parent_seq == other.parent_seq \
-                and self.timestamps == other.timestamps and self.alloc_file_size == other.alloc_file_size \
-                and self.real_file_size == other.real_file_size and self.flags == other.flags \
-                and self.reparse_value == other.reparse_value and self.name_type == other.name_type \
-                and self.name == other.name
-        return False
+Warning:
+    The information related to "allocated file size" and "real file size"
+    in this attribute is NOT reliable. Blame Microsoft. If you want a more
+    reliable information, use the ``Datastream`` objects in the api module.
 
-    def __len__(self):
-        return  FileName._REPR.size + len(name.encode("utf_16_le"))
+Note:
+    This class receives an Iterable as argument, the "Parameters/Args" section
+    represents what must be inside the Iterable. The Iterable MUST preserve
+    order or things might go boom.
 
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(parent_ref={}, parent_seq={}, timestamps={!s}, alloc_file_size={}, real_file_size={}, flags={!s}, reparse_value={}, name_len={}, name_type={!s}, name={})'.format(
-            self.parent_ref, self.parent_seq, self.timestamps, self.alloc_file_size, self.real_file_size, self.flags,
-            self.reparse_value, self.name_len, self.name_type, self.name)
+Args:
+    content[0] (int): Parent reference
+    content[1] (int): Parent sequence
+    content[2] (:obj:`Timestamps`): Filename timestamps
+    content[3] (int): Allocated size of the file
+    content[4] (int): Logica/Real file size
+    content[5] (:obj:`FileInfoFlags`): File flags
+    content[6] (int): Reparse value
+    content[7] (int): Name length
+    content[8] (:obj:`NameType`): Name type
+    content[9] (str): Name
+
+Attributes:
+    parent_ref (int): Parent refence
+    parent_seq (int): Parent sequence
+    timestamps (:obj:`FileInfoFlags`Timestamps): Filename timestamps
+    alloc_file_size (int): Allocated size of the file
+    real_file_size (int): Logica/Real file size
+    flags (:obj:`FileInfoFlags`): File flags
+    reparse_value (int): Reparse value
+    name_type (:obj:`NameType`): Name type
+    name (str): Name
+'''
+
+_filename_namespace = {"__len__" : _len_filename,
+                       "create_from_binary" : classmethod(_from_binary_filename)
+                 }
+
+FileName = _create_attrcontent_class("FileName",
+            ("parent_ref", "parent_seq", "timestamps", "alloc_file_size",
+            "real_file_size", "flags", "reparse_value", "name_type", "name"),
+        inheritance=(AttributeContentRepr,), data_structure="<7Q2I2B",
+        extra_functions=_filename_namespace, docstring=_docstring_filename)
 
 #******************************************************************************
 # DATA ATTRIBUTE
