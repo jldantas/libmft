@@ -100,20 +100,61 @@ class AttributeContentRepr(AttributeContentBase):
 # Class factory helper
 #******************************************************************************
 #TODO move this to some other place?
-def _create_attrcontent_class(name, fields, inheritance=(object,), data_structure=None, extra_functions=None):
-    '''
-    name - str
-    fields - tuple of str
+def _create_attrcontent_class(name, fields, inheritance=(object,), data_structure=None, extra_functions=None, docstring=""):
+    '''Helper function that creates a class for attribute contents.
 
+    This function creates is a boilerplate to create all the expected methods of
+    an attributes. The basic methods work in the same way for all classes.
+
+    Once it executes it defines a dynamic class with the methods "__init__",
+    "__repr__" and "__eq__" based on the fields passed in the ``fields`` parameter.
+    If the ``data_structure`` parameter is present, the classmethod ``get_representation_size``
+    and the class variable ``_REPR`` will also be present.
+
+    It is also possible to define the inheritance using this method by passing
+    a list of classes in the ``inheritance`` parameter.
+
+    If the ``extra_functions`` argument is present, they will be added to the
+    class.
+
+    Note:
+        If the ``extra_functions`` has defined any of dinamically created methods,
+        they will *replace* the ones created.
+
+
+    Args:
+        name (str): Name of the class that will be created.
+        fields (tuple(str)): The attributes that will be added to the class.
+        inherited (tuple(object)): List of objects that will be inherited by
+            the new class
+        extra_functions (dict(str : function)): A dictionary where the key
+            will be the name of the function in the class and the content
+            of the key is a function that will be bound to the class
+        doctring (str): Class' docstring
+
+    Returns:
+        A new class with the ``name`` as it's name.
     '''
 
     def create_func_from_str(f_name, args, content, docstring=""):
         '''Helper function to create functions from strings.
 
-        f_name - str
-        args - list of str
-        content - str
-        docstring - str
+        To improve performance, the standard functions are created at runtime
+        based on the string derived from the content. This way the function, from
+        the interpreter point of view, looks like statically defined.
+
+        Note:
+            This function should be used only for methods that will receive
+            ``self`` (instace methods). The ``self`` argument is added automatically.
+
+        Args:
+            f_name (str): Function name
+            args (list(str)): List of extra arguments that the function will receive
+            content (str): Content of the function
+            docstring (str): Function's docstring
+
+        Returns:
+            A new function object that can be inserted in the class.
         '''
         exec_namespace = {"__name__" : f"{f_name}"}
         new_args = ", ".join(["self"] + args)
@@ -157,6 +198,8 @@ def _create_attrcontent_class(name, fields, inheritance=(object,), data_structur
     if data_structure is not None:
         namespace["_REPR"] = struct.Struct(data_structure)
         namespace["get_representation_size"] = get_representation_size
+    if docstring:
+        namespace["__doc__"] = docstring
     #some new mappings can be set or overload the ones defined
     if extra_functions is not None:
         for method in extra_functions.values():
@@ -230,103 +273,38 @@ def _astimezone_ts(self, timezone):
 
         return nw_obj
 
+_docstring_ts = '''Represents a group of timestamps based on how MFT records.
+
+Aggregates the entries for timesamps when dealing with standard NTFS timestamps,
+e.g., created, changed, mft change and accessed. All attributes are time zone
+aware.
+
+Note:
+    This class receives an Iterable as argument, the "Parameters/Args" section
+    represents what must be inside the Iterable. The Iterable MUST preserve
+    order or things might go boom.
+
+Args:
+    content[0] (:obj:`datetime`): Created timestamp
+    content[1] (datetime): Changed timestamp
+    content[2] (datetime): MFT change timestamp
+    content[3] (datetime): Accessed timestamp
+
+Attributes:
+    created (datetime): A datetime with the created timestamp
+    changed (datetime): A datetime with the changed timestamp
+    mft_changed (datetime): A datetime with the mft_changed timestamp
+    accessed (datetime): A datetime with the accessed timestamp
+'''
+
 _ts_namespace = {"__len__" : _len_ts,
                  "create_from_binary" : classmethod(_from_binary_ts),
-                 "astimezone" : _astimezone_ts}
+                 "astimezone" : _astimezone_ts
+                 }
+
 Timestamps = _create_attrcontent_class("Timestamps", ("created", "changed", "mft_changed", "accessed"),
-                data_structure="<4Q", extra_functions=_ts_namespace)
-
-
-# class Timestamps(AttributeContentRepr):
-#     '''Represents a group of timestamps based on how MFT records.
-#
-#     Aggregates the entries for timesamps when dealing with standard NTFS timestamps,
-#     e.g., created, changed, mft change and accessed. All attributes are time zone
-#     aware.
-#
-#     Note:
-#         This class receives an Iterable as argument, the "Parameters/Args" section
-#         represents what must be inside the Iterable. The Iterable MUST preserve
-#         order or things might go boom.
-#
-#     Args:
-#         content[0] (:obj:`datetime`): Created timestamp
-#         content[1] (datetime): Changed timestamp
-#         content[2] (datetime): MFT change timestamp
-#         content[3] (datetime): Accessed timestamp
-#
-#     Attributes:
-#         created (datetime): A datetime with the created timestamp
-#         changed (datetime): A datetime with the changed timestamp
-#         mft_changed (datetime): A datetime with the mft_changed timestamp
-#         accessed (datetime): A datetime with the accessed timestamp
-#     '''
-#
-#     _REPR = struct.Struct("<4Q")
-#
-#     def __init__(self, content=(None,)*4):
-#         """Check class docstring"""
-#         self.created, self.changed, self.mft_changed, self.accessed = content
-#
-#     def astimezone(self, timezone):
-#         """Changes the time zones of all timestamps.
-#
-#         Receives a new timezone and applies to all timestamps, if necessary.
-#
-#         Args:
-#             timezone (:obj:`tzinfo`): Time zone to be applied
-#
-#         Returns:
-#             A new ``Timestamps`` object if the time zone changes, otherwise returns ``self``.
-#         """
-#         if self.created.tzinfo is timezone:
-#             return self
-#         else:
-#             nw_obj = cls((None,)*4)
-#             nw_obj.created = self.created.astimezone(timezone)
-#             nw_obj.changed = self.changed.astimezone(timezone)
-#             nw_obj.mft_changed = self.mft_changed.astimezone(timezone)
-#             nw_obj.accessed = self.accessed.astimezone(timezone)
-#
-#             return nw_obj
-#
-#     @classmethod
-#     def get_representation_size(cls):
-#         """See base class."""
-#         return cls._REPR.size
-#
-#     @classmethod
-#     def create_from_binary(cls, binary_stream):
-#         """See base class."""
-#         repr = cls._REPR
-#
-#         if len(binary_stream) != repr.size:
-#             raise ContentError("Invalid binary stream size")
-#
-#         _MOD_LOGGER.debug("Unpacking TIMESTAMPS content")
-#         content = repr.unpack(binary_stream)
-#         nw_obj = cls()
-#         nw_obj.created, nw_obj.changed, nw_obj.mft_changed, nw_obj.accessed = \
-#             convert_filetime(content[0]), convert_filetime(content[1]), \
-#             convert_filetime(content[2]), convert_filetime(content[3])
-#         #_MOD_LOGGER.debug(f"Timestamp created: {nw_obj}")
-#         _MOD_LOGGER.debug("Timestamp created: %r", nw_obj)
-#         _MOD_LOGGER.debug("TIMESTAMPS object created successfully")
-#
-#         return nw_obj
-#
-#     def __eq__(self, other):
-#         if isinstance(other, Timestamps):
-#             return self.created == other.created and self.changed == other.changed \
-#                 and self.mft_changed == other.mft_changed and self.accessed == other.accessed
-#         return False
-#
-#     def __len__(self):
-#         return Timestamps._REPR.size
-#
-#     def __repr__(self):
-#         'Return a nicely formatted representation string'
-#         return f'{self.__class__.__name__}(created={self.created}, changed={self.changed}, mft_changed={self.mft_changed}, accessed={self.accessed})'
+        inheritance=(AttributeContentRepr,), data_structure="<4Q",
+        extra_functions=_ts_namespace, docstring=_docstring_ts)
 
 #******************************************************************************
 # STANDARD_INFORMATION ATTRIBUTE
