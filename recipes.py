@@ -89,7 +89,7 @@ def test_my_mft():
     mft_config.load_ea_info = False
     mft_config.load_ea = False
     mft_config.load_log_tool_str = False
-    mft_config.load_attr_list = False
+    mft_config.load_attr_list = True
 
     '''Entries to play:
         my_mft/75429 - datastream (multiple data attributes accross many entries)

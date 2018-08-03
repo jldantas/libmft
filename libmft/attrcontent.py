@@ -206,7 +206,13 @@ def _create_attrcontent_class(name, fields, inheritance=(object,), data_structur
             try:
                 method.__qualname__ = f'{name}.{method.__name__}'
             except AttributeError:
-                method.__func__.__qualname__ = f'{name}.{method.__func__.__name__}'
+                try:
+                    method.__func__.__qualname__ = f'{name}.{method.__func__.__name__}'
+                except AttributeError:
+                    #if we got here, it is not a method or classmethod, must be an attribute
+                    #TODO feels like a hack, change it
+                    #TODO design a test for this
+                    pass
         namespace = {**namespace, **extra_functions}
 
     #TODO check if docstring was provided, issue a warning
@@ -239,15 +245,13 @@ def _from_binary_ts(cls, binary_stream):
     if len(binary_stream) != repr.size:
         raise ContentError("Invalid binary stream size")
 
-    _MOD_LOGGER.debug("Unpacking TIMESTAMPS content")
     content = repr.unpack(binary_stream)
     nw_obj = cls()
     nw_obj.created, nw_obj.changed, nw_obj.mft_changed, nw_obj.accessed = \
         convert_filetime(content[0]), convert_filetime(content[1]), \
         convert_filetime(content[2]), convert_filetime(content[3])
-    #_MOD_LOGGER.debug(f"Timestamp created: {nw_obj}")
-    _MOD_LOGGER.debug("Timestamp created: %r", nw_obj)
-    _MOD_LOGGER.debug("TIMESTAMPS object created successfully")
+
+    _MOD_LOGGER.debug("Attempted to unpack Timestamp from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
 
     return nw_obj
 
@@ -309,46 +313,11 @@ Timestamps = _create_attrcontent_class("Timestamps", ("created", "changed", "mft
 #******************************************************************************
 # STANDARD_INFORMATION ATTRIBUTE
 #******************************************************************************
-class StandardInformation(AttributeContentRepr):
-    '''Represents the STANDARD_INFORMATION content.
+def _len_stdinfo(self):
+    return StandardInformation._TIMESTAMP_SIZE + StandardInformation._REPR.size
 
-    Has all the data structures to represent a STANDARD_INFORMATION attribute,
-    allowing everything to be accessed with python objects/types.
-
-    Note:
-        This class receives an Iterable as argument, the "Parameters/Args" section
-        represents what must be inside the Iterable. The Iterable MUST preserve
-        order or things might go boom.
-
-    Args:
-        content[0] (:obj:`Timestamps`): Timestamp object
-        content[1] (:obj:`FileInfoFlags`): A FIleInfoFlags object with the flags
-            for this object
-        content[2] (int): Maximum number of allowed versions
-        content[3] (int): Current version number
-        content[4] (int): Class id
-        content[5] (int): Owner id
-        content[6] (int): Security id
-        content[7] (int): Quota charged
-        content[8] (int): Update Sequence Number (USN)
-
-    Attributes:
-        timestamps (:obj:`Timestamps`): All attribute's timestamps
-        flags (:obj:`FileInfoFlags`): STANDARD_INFORMATION flags for the file
-        max_n_versions (int): Maximum number of allowed versions
-        version_number (int): Current version number
-        class_id (int): Class id
-        owner_id (int): Owner id
-        security_id (int): Security id
-        quota_charged (int): Quota charged
-        usn (int): Update Sequence Number (USN)
-    '''
-    #TODO looks ugly... fix
-    _TIMESTAMP_SIZE = Timestamps.get_representation_size()
-    # _REPR = struct.Struct("<4I2I2Q")
-    # _REPR_NO_NFTS_3_EXTENSION = struct.Struct("<4I")
-    _REPR = struct.Struct("<4Q4I2I2Q")
-    _REPR_NO_NFTS_3_EXTENSION = struct.Struct("<4Q4I")
+def _from_binary_stdinfo(cls, binary_stream):
+    """See base class."""
     '''
         TIMESTAMPS(32)
             Creation time - 8
@@ -365,122 +334,76 @@ class StandardInformation(AttributeContentRepr):
         Update Sequence Number (USN) - 8 (NTFS 3+)
     '''
 
-    __slots__ = ("timestamps", "flags", "max_n_versions", "version_number", "class_id",
-        "owner_id", "security_id", "quota_charged", "usn")
+    if len(binary_stream) == cls._REPR.size: #check if it is v3 by size of the stram
+        t_created, t_changed, t_mft_changed, t_accessed, flags, m_ver, ver, \
+            c_id, o_id, s_id, quota_charged, usn = cls._REPR.unpack(binary_stream)
+        nw_obj = cls(
+            (   Timestamps((convert_filetime(t_created), convert_filetime(t_changed),
+                            convert_filetime(t_mft_changed), convert_filetime(t_accessed))
+            ), FileInfoFlags(flags), m_ver, ver, c_id, o_id, s_id, quota_charged, usn))
+    else:
+        #if the content is not using v3 extension, added the missing stuff for consistency
+        t_created, t_changed, t_mft_changed, t_accessed, flags, m_ver, ver, \
+            c_id  = cls._REPR_NO_NFTS_3_EXTENSION.unpack(binary_stream)
+        nw_obj = cls(
+            (   Timestamps((convert_filetime(t_created), convert_filetime(t_changed),
+                            convert_filetime(t_mft_changed), convert_filetime(t_accessed))
+            ), FileInfoFlags(flags), m_ver, ver, c_id, None, None, None, None))
 
-    def __init__(self, content=(None,)*9):
-        """Check class docstring"""
-        self.timestamps, self.flags, self.max_n_versions, self.version_number, \
-        self.class_id, self.owner_id,  \
-        self.security_id, self.quota_charged, self.usn = content
+    _MOD_LOGGER.debug("Attempted to unpack STANDARD_INFORMATION from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
 
-    @classmethod
-    def get_representation_size(cls):
-        """See base class."""
-        return cls._TIMESTAMP_SIZE + cls._REPR.size
+    return nw_obj
 
-    # @classmethod
-    # def create_from_binary(cls, binary_stream):
-    #     """See base class."""
-    #     _MOD_LOGGER.debug("Unpacking STANDARD_INFORMATION content")
-    #
-    #     timestamps = Timestamps.create_from_binary(binary_stream[:cls._TIMESTAMP_SIZE])
-    #     if len(binary_stream) == cls._TIMESTAMP_SIZE + cls._REPR.size:
-    #         _MOD_LOGGER.debug("Unpacking STDInfo with NTFS 3 extension")
-    #         main_content = cls._REPR.unpack(binary_stream[cls._TIMESTAMP_SIZE:])
-    #         nw_obj = cls(_chain((timestamps,), main_content))
-    #     else:
-    #         _MOD_LOGGER.debug("Unpacking STDInfo without NTFS 3 extension")
-    #         main_content = cls._REPR_NO_NFTS_3_EXTENSION.unpack(binary_stream[cls._TIMESTAMP_SIZE:])
-    #         nw_obj = cls(_chain((timestamps,), main_content, (None, None, None, None)))
-    #     nw_obj.flags = FileInfoFlags(nw_obj.flags)
-    #     _MOD_LOGGER.debug("StandardInformation object created successfully")
-    #
-    #     return nw_obj
+_docstring_stdinfo = '''Represents the STANDARD_INFORMATION content.
 
-    ##############################
-    #change 2
-    @classmethod
-    def create_from_binary(cls, binary_stream):
-        """See base class."""
-        _MOD_LOGGER.debug("Unpacking STANDARD_INFORMATION content")
+Has all the data structures to represent a STANDARD_INFORMATION attribute,
+allowing everything to be accessed with python objects/types.
 
-        if len(binary_stream) == cls._REPR.size:
-            _MOD_LOGGER.debug("Unpacking STDInfo with NTFS 3 extension")
-            t1, t2, t3, t4, a, b, c, d, e, f, g, h = cls._REPR.unpack(binary_stream)
-            nw_obj = cls((Timestamps((convert_filetime(t1), convert_filetime(t2), convert_filetime(t3), convert_filetime(t4))) , FileInfoFlags(a), b, c, d, e, f, g, h))
-        else:
-            _MOD_LOGGER.debug("Unpacking STDInfo without NTFS 3 extension")
-            t1, t2, t3, t4, a, b, c, d = cls._REPR_NO_NFTS_3_EXTENSION.unpack(binary_stream)
-            nw_obj = cls((Timestamps((convert_filetime(t1), convert_filetime(t2), convert_filetime(t3), convert_filetime(t4))), FileInfoFlags(a), b, c, d, None, None, None, None))
-            # print(len(binary_stream), binary_stream.tobytes())
+Note:
+    This class receives an Iterable as argument, the "Parameters/Args" section
+    represents what must be inside the Iterable. The Iterable MUST preserve
+    order or things might go boom.
 
-        #print(nw_obj)
+Args:
+    content[0] (:obj:`Timestamps`): Timestamp object
+    content[1] (:obj:`FileInfoFlags`): A FIleInfoFlags object with the flags
+        for this object
+    content[2] (int): Maximum number of allowed versions
+    content[3] (int): Current version number
+    content[4] (int): Class id
+    content[5] (int): Owner id
+    content[6] (int): Security id
+    content[7] (int): Quota charged
+    content[8] (int): Update Sequence Number (USN)
 
-        _MOD_LOGGER.debug("StandardInformation object created successfully")
+Attributes:
+    timestamps (:obj:`Timestamps`): All attribute's timestamps
+    flags (:obj:`FileInfoFlags`): STANDARD_INFORMATION flags for the file
+    max_n_versions (int): Maximum number of allowed versions
+    version_number (int): Current version number
+    class_id (int): Class id
+    owner_id (int): Owner id
+    security_id (int): Security id
+    quota_charged (int): Quota charged
+    usn (int): Update Sequence Number (USN)
+'''
 
-        return nw_obj
+_stdinfo_namespace = {"__len__" : _len_stdinfo,
+                 "create_from_binary" : classmethod(_from_binary_stdinfo),
+                 "_REPR_NO_NFTS_3_EXTENSION" : struct.Struct("<4Q4I")
+                 }
 
-
-
-
-
-
-    def __eq__(self, other):
-        if isinstance(other, StandardInformation):
-            return self.timestamps == other.timestamps and self.flags == other.flags \
-                and self.max_n_versions == other.max_n_versions and self.version_number == other.version_number \
-                and self.class_id == other.class_id and self.owner_id == other.owner_id \
-                and self.security_id == other.security_id and self.quota_charged == other.quota_charged \
-                and self.usn == other.usn
-        return False
-
-    def __len__(self):
-        return StandardInformation._TIMESTAMP_SIZE + StandardInformation._REPR.size
-
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return self.__class__.__name__ + (f'(timestamps={repr(self.timestamps)},'
-            f'flags={str(self.flags)}, max_n_versions={self.max_n_versions},'
-            f'version_number={self.version_number}, class_id={self.class_id},'
-            f'owner_id={self.owner_id}, security_id={self.security_id},'
-            f'quota_charged={self.quota_charged}, usn={self.usn})')
+StandardInformation = _create_attrcontent_class("StandardInformation",
+            ("timestamps", "flags", "max_n_versions", "version_number", "class_id",
+                "owner_id", "security_id", "quota_charged", "usn"),
+        inheritance=(AttributeContentRepr,), data_structure="<4Q4I2I2Q",
+        extra_functions=_stdinfo_namespace, docstring=_docstring_stdinfo)
 
 #******************************************************************************
 # ATTRIBUTE_LIST ATTRIBUTE
 #******************************************************************************
-class AttributeListEntry(AttributeContentRepr):
-    '''Represents an entry for ATTRIBUTE_LIST.
-
-    Has all the data structures to represent one entry of the ATTRIBUTE_LIST
-    content allowing everything to be accessed with python objects/types.
-
-    Note:
-        This class receives an Iterable as argument, the "Parameters/Args" section
-        represents what must be inside the Iterable. The Iterable MUST preserve
-        order or things might go boom.
-
-    Args:
-        content[0] (:obj:`AttrTypes`): Type of the attribute in the entry
-        content[1] (int): Length of the entry, in bytes
-        content[2] (int): Length of the name, in bytes
-        content[3] (int): Offset to the name, in bytes
-        content[4] (int): Start VCN
-        content[5] (int): File reference number
-        content[6] (int): File sequence number
-        content[7] (int): Attribute ID
-        content[8] (int): Name
-
-    Attributes:
-        attr_type (:obj:`Timestamps`): Type of the attribute in the entry
-        name_offset (int): Offset to the name, in bytes
-        start_vcn (int): Start VCN
-        file_ref (int): File reference number
-        file_seq (int): File sequence number
-        attr_id (int): Attribute ID
-        name (int): Name
-    '''
-    _REPR = struct.Struct("<IH2B2QH")
+def _from_binary_attrlist_e(cls, binary_stream):
+    """See base class."""
     '''
         Attribute type - 4
         Length of a particular entry - 2
@@ -492,62 +415,62 @@ class AttributeListEntry(AttributeContentRepr):
         Name (unicode) - variable
     '''
 
-    def __init__(self, content=(None,)*9):
-        """Check class docstring"""
-        self.attr_type, self._entry_len, _, self.name_offset, \
-        self.start_vcn, self.file_ref, self.file_seq, self.attr_id, self.name = content
+    attr_type, entry_len, name_len, name_off, s_vcn, f_tag, attr_id = cls._REPR.unpack(binary_stream[:cls._REPR.size])
+    if name_len:
+        name = binary_stream[name_off:name_off+(2*name_len)].tobytes().decode("utf_16_le")
+    else:
+        name = None
+    file_ref, file_seq = get_file_reference(f_tag)
+    nw_obj = cls((AttrTypes(attr_type), entry_len, name_off, s_vcn, file_ref, file_seq, attr_id, name))
 
-    def _get_name_length(self):
-        '''int:Returns the length of the name based on the name'''
-        if self.name is None:
-            return 0
-        else:
-            return len(self.name)
+    _MOD_LOGGER.debug("Attempted to unpack ATTRIBUTE_LIST Entry from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
 
-    #the name length can derived from the name, so, we don't need to keep in memory
-    name_len = property(_get_name_length, doc='Length of the name')
+    return nw_obj
 
-    @classmethod
-    def get_representation_size(cls):
-        """See base class."""
-        return cls._REPR.size
+def _len_stdinfo_attrlist_e(self):
+    '''Returns the size of the entry, in bytes'''
+    return self._entry_len
 
-    @classmethod
-    def create_from_binary(cls, binary_view):
-        """See base class."""
-        _MOD_LOGGER.debug("Unpacking ATTRIBUTE_LIST content")
-        content = cls._REPR.unpack(binary_view[:cls._REPR.size])
-        nw_obj = cls()
+_docstring_attrlist_e = '''Represents an entry for ATTRIBUTE_LIST.
 
-        if content[2]:
-            name = binary_view[content[3]:content[3]+(2*content[2])].tobytes().decode("utf_16_le")
-        else:
-            name = None
-        file_ref, file_seq = get_file_reference(content[5])
-        nw_obj.attr_type, nw_obj._entry_len, nw_obj.name_offset, nw_obj.start_vcn,  \
-        nw_obj.file_ref, nw_obj.file_seq, nw_obj.attr_id, nw_obj.name = \
-        AttrTypes(content[0]), content[1], content[3], content[4], \
-        file_ref, file_seq, content[6], name
-        _MOD_LOGGER.debug("AttributeListEntry object created successfully")
+Has all the data structures to represent one entry of the ATTRIBUTE_LIST
+content allowing everything to be accessed with python objects/types.
 
-        return nw_obj
+Note:
+    This class receives an Iterable as argument, the "Parameters/Args" section
+    represents what must be inside the Iterable. The Iterable MUST preserve
+    order or things might go boom.
 
-    def __len__(self):
-        '''Returns the size of the entry, in bytes'''
-        return self._entry_len
+Args:
+    content[0] (:obj:`AttrTypes`): Type of the attribute in the entry
+    content[1] (int): Length of the entry, in bytes
+    content[2] (int): Length of the name, in bytes
+    content[3] (int): Offset to the name, in bytes
+    content[4] (int): Start VCN
+    content[5] (int): File reference number
+    content[6] (int): File sequence number
+    content[7] (int): Attribute ID
+    content[8] (int): Name
 
-    def __eq__(self, other):
-        if isinstance(other, AttributeListEntry):
-            return self.attr_type == other.attr_type and self.entry_len == other.entry_len \
-                and self.name_len == other.name_len and self.name_offset == other.name_offset \
-                and self.start_vcn == other.start_vcn and self.file_ref == other.file_ref \
-                and self.file_seq == other.file_seq and self.attr_id == other.attr_id \
-                and self.name == other.name
-        return False
+Attributes:
+    attr_type (:obj:`Timestamps`): Type of the attribute in the entry
+    name_offset (int): Offset to the name, in bytes
+    start_vcn (int): Start VCN
+    file_ref (int): File reference number
+    file_seq (int): File sequence number
+    attr_id (int): Attribute ID
+    name (int): Name
+'''
 
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f'(attr_type={self.attr_type}, _entry_len={self._entry_len}, name_len={self.name_len}, name_offset={self.name_offset}, start_vcn={self.start_vcn}, file_ref={self.file_ref}, file_seq={self.file_seq}, attr_id={self.attr_id}, name={self.name})'
+_attrlist_e_namespace = {"__len__" : _len_stdinfo_attrlist_e,
+                 "create_from_binary" : classmethod(_from_binary_attrlist_e)
+                 }
+
+AttributeListEntry = _create_attrcontent_class("AttributeListEntry",
+            ("attr_type", "_entry_len", "name_offset", "start_vcn",
+                "file_ref", "file_seq", "attr_id", "name"),
+        inheritance=(AttributeContentRepr,), data_structure="<IH2B2QH",
+        extra_functions=_attrlist_e_namespace, docstring=_docstring_attrlist_e)
 
 class AttributeList(AttributeContentNoRepr):
     '''Represents the contents for the ATTRIBUTE_LIST attribute.
