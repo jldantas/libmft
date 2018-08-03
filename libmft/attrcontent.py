@@ -731,7 +731,7 @@ Args:
 Attributes:
     parent_ref (int): Parent refence
     parent_seq (int): Parent sequence
-    timestamps (:obj:`FileInfoFlags`Timestamps): Filename timestamps
+    timestamps (:obj:`Timestamps`): Filename timestamps
     alloc_file_size (int): Allocated size of the file
     real_file_size (int): Logica/Real file size
     flags (:obj:`FileInfoFlags`): File flags
@@ -753,140 +753,93 @@ FileName = _create_attrcontent_class("FileName",
 #******************************************************************************
 # DATA ATTRIBUTE
 #******************************************************************************
-class Data(AttributeContentNoRepr):
-    '''Represents the content of a DATA attribute.
+def _from_binary_data(cls, binary_stream):
+    """See base class."""
+    return cls(binary_stream.tobytes())
 
-    This is a placeholder class to the data attribute. By itself, it does
-    very little and holds almost no information. If the data is resident, holds the
-    content and the size.
+def _len_data(self):
+    return len(self.content)
 
-    Args:
-        binary_data (:obj:`bytes`): Data content
+_docstring_data = """Represents the content of a DATA attribute.
 
-    Attributes:
-        content (:obj:`bytes`): Data content
-    '''
-    def __init__(self, binary_data):
-        """Check class docstring"""
-        self.content = binary_data
+This is a placeholder class to the data attribute. By itself, it does
+very little and holds almost no information. If the data is resident, holds the
+content and the size.
 
-    @classmethod
-    def create_from_binary(cls, binary_stream):
-        """See base class."""
-        return cls(binary_stream.tobytes())
+Args:
+    binary_data (:obj:`bytes`): Data content
 
-    def __len__(self):
-        '''Returns the logical size of the file'''
-        return len(self.content)
+Attributes:
+    content (:obj:`bytes`): Data content
+"""
 
-    def __eq__(self, other):
-        if isinstance(other, Data):
-            return self.content == other.content
-        return False
+_data_namespace = {"__len__" : _len_data,
+                       "create_from_binary" : classmethod(_from_binary_data)
+                 }
 
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f'(content={self.content})'
+Data = _create_attrcontent_class("Data",
+            ("content", ),
+        inheritance=(AttributeContentNoRepr,), data_structure=None,
+        extra_functions=_data_namespace, docstring=_docstring_data)
 
 #******************************************************************************
 # INDEX_ROOT ATTRIBUTE
 #******************************************************************************
-class IndexNodeHeader(AttributeContentRepr):
-    '''Represents the Index Node Header, that is always present in the INDEX_ROOT
-    and INDEX_ALLOCATION attribute.
-
-    The composition of an INDEX_ROOT and INDEX_ALLOCATION always start with
-    a header. This class represents this header.
-
-    Note:
-        This class receives an Iterable as argument, the "Parameters/Args" section
-        represents what must be inside the Iterable. The Iterable MUST preserve
-        order or things might go boom.
-
-    Args:
-        content[0] (int): Start offset
-        content[1] (int): End offset
-        content[2] (int): Allocated size of the node
-        content[3] (int): Non-leaf node Flag (has subnodes)
-
-    Attributes:
-        start_offset (int): Start offset
-        end_offset (int): End offset
-        end_alloc_offset (int): Allocated size of the node
-        flags (int): Non-leaf node Flag (has subnodes)
-    '''
-
-    _REPR = struct.Struct("<4I")
+def _from_binary_idx_nh(cls, binary_stream):
+    """See base class."""
     ''' Offset to start of index entry - 4
         Offset to end of used portion of index entry - 4
         Offset to end of the allocated index entry - 4
         Flags - 4
     '''
+    nw_obj = cls(cls._REPR.unpack(binary_stream[:cls._REPR.size]))
 
-    def __init__(self, content=(None,)*4):
-        """Check class docstring"""
-        self.start_offset, self.end_offset, self.end_alloc_offset, \
-        self.flags = content
+    _MOD_LOGGER.debug("Attempted to unpack VOLUME_INFORMATION Entry from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
 
-    @classmethod
-    def get_representation_size(cls):
-        """See base class."""
-        return cls._REPR.size
+    return nw_obj
 
-    @classmethod
-    def create_from_binary(cls, binary_view):
-        """See base class."""
-        nw_obj = cls(cls._REPR.unpack(binary_view[:cls._REPR.size]))
-        _MOD_LOGGER.debug("IndexNodeHeader object created successfully")
+def _len_idx_nh(self):
+    return IndexNodeHeader._REPR.size
 
-        return nw_obj
+_docstring_idx_nh = '''Represents the Index Node Header, that is always present in the INDEX_ROOT
+and INDEX_ALLOCATION attribute.
 
-    def __len__(self):
-        '''Get the actual size of the content, as some attributes have variable sizes'''
-        return IndexNodeHeader._REPR.size
+The composition of an INDEX_ROOT and INDEX_ALLOCATION always start with
+a header. This class represents this header.
 
-    def __eq__(self, other):
-        if isinstance(other, IndexNodeHeader):
-            return self.start_offset == other.start_offset \
-                and self.end_offset == other.end_offset \
-                and self.end_alloc_offset == other.end_alloc_offset \
-                and self.flags == other.flags
-        return False
+Note:
+    This class receives an Iterable as argument, the "Parameters/Args" section
+    represents what must be inside the Iterable. The Iterable MUST preserve
+    order or things might go boom.
 
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f'(start_offset={self.start_offset}, end_offset={self.end_offset}, end_alloc_offset={self.end_alloc_offset}, flags={self.flags})'
+Args:
+    content[0] (int): Start offset
+    content[1] (int): End offset
+    content[2] (int): Allocated size of the node
+    content[3] (int): Non-leaf node Flag (has subnodes)
 
-class IndexEntry(AttributeContentRepr):
-    '''Represents an entry in the index.
+Attributes:
+    start_offset (int): Start offset
+    end_offset (int): End offset
+    end_alloc_offset (int): Allocated size of the node
+    flags (int): Non-leaf node Flag (has subnodes)
+'''
 
-    An Index, from the MFT perspective is composed of multiple entries. This class
-    represents these entries. Normally entries contain a FILENAME attribute.
-    Note the entry can have other types of content, for these cases the class
-    saves the raw bytes
+_idx_nh_namespace = {"__len__" : _len_idx_nh,
+                       "create_from_binary" : classmethod(_from_binary_idx_nh)
+                 }
 
-    Note:
-        This class receives an Iterable as argument, the "Parameters/Args" section
-        represents what must be inside the Iterable. The Iterable MUST preserve
-        order or things might go boom.
+IndexNodeHeader = _create_attrcontent_class("IndexNodeHeader",
+            ("start_offset", "end_offset", "end_alloc_offset", "flags"),
+        inheritance=(AttributeContentRepr,), data_structure="<4I",
+        extra_functions=_idx_nh_namespace, docstring=_docstring_idx_nh)
 
-    Args:
-        content[0] (int): File reference?
-        content[1] (int): Length of the entry
-        content[2] (int): Length of the content
-        content[3] (:obj:`IndexEntryFlags`): Flags
-        content[4] (:obj:`FileName` or bytes): Content of the entry
-        content[5] (int): VCN child node
+#------------------------------------------------------------------------------
 
-    Attributes:
-        generic (int): File reference?
-        content_len (int): Length of the content
-        flags (:obj:`IndexEntryFlags`): Flags
-        content (:obj:`FileName` or bytes): Content of the entry
-        vcn_child_node (int): VCN child node
-    '''
-
-    _REPR = struct.Struct("<Q2HI")
+def _from_binary_idx_e(cls, binary_stream, content_type=None):
+    """See base class."""
+    #TODO don't save this here and overload later?
+    #TODO confirm if this is really generic or is always a file reference
     ''' Undefined - 8
         Length of entry - 2
         Length of content - 2
@@ -894,157 +847,141 @@ class IndexEntry(AttributeContentRepr):
         Content - variable
         VCN of child node - 8 (exists only if flag is set, aligned to a 8 byte boundary)
     '''
-    _REPR_VCN = struct.Struct("<Q")
+    repr_size = cls._REPR.size
+    generic, entry_len, cont_len, flags = cls._REPR.unpack(binary_stream[:repr_size])
+    vcn_child_node = (None,)
 
-    def __init__(self, content=(None,)*6):
-        """Check class docstring"""
-        #TODO don't save this here and overload later?
-        #TODO confirm if this is really generic or is always a file reference
-        #this generic variable changes depending what information is stored
-        #in the index
-        self.generic, self._entry_len, self.content_len, self.flags, \
-        self.content, self.vcn_child_node = content
+    #if content is known (filename), create a new object to represent the content
+    if content_type is AttrTypes.FILE_NAME and cont_len:
+        binary_content = FileName.create_from_binary(binary_stream[repr_size:repr_size+cont_len])
+    else:
+        binary_content = binary_stream[repr_size:repr_size+cont_len].tobytes()
+    #if there is a next entry, we need to pad it to a 8 byte boundary
+    if flags & IndexEntryFlags.CHILD_NODE_EXISTS:
+        temp_size = repr_size + cont_len
+        boundary_fix = (entry_len - temp_size) % 8
+        vcn_child_node = cls._REPR_VCN.unpack(binary_stream[temp_size+boundary_fix:temp_size+boundary_fix+8])
 
-    @classmethod
-    def get_representation_size(cls):
-        """See base class."""
-        return cls._REPR.size
+    nw_obj = cls((generic, entry_len, cont_len, IndexEntryFlags(flags), binary_content, vcn_child_node))
 
-    @classmethod
-    def create_from_binary(cls, binary_view, content_type=None):
-        """See base class."""
-        repr_size = cls._REPR.size
-        content = cls._REPR.unpack(binary_view[:repr_size])
-        nw_obj = cls()
+    _MOD_LOGGER.debug("Attempted to unpack VOLUME_INFORMATION Entry from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
 
-        vcn_child_node = (None,)
-        #if content is known (filename), create a new object to represent the content
-        if content_type is AttrTypes.FILE_NAME and content[2]:
-            binary_content = FileName.create_from_binary(binary_view[repr_size:repr_size+content[2]])
-        else:
-            binary_content = binary_view[repr_size:repr_size+content[2]].tobytes()
-        #if there is a next entry, we need to pad it to a 8 byte boundary
-        if content[3] & IndexEntryFlags.CHILD_NODE_EXISTS:
-            temp_size = repr_size + content[2]
-            boundary_fix = (content[1] - temp_size) % 8
-            vcn_child_node = cls._REPR_VCN.unpack(binary_view[temp_size+boundary_fix:temp_size+boundary_fix+8])
+    return nw_obj
 
-        nw_obj.generic, nw_obj._entry_len, nw_obj.content_len, nw_obj.flags, \
-        nw_obj.content, nw_obj.vcn_child_node = content[0], content[1], content[2], \
-            IndexEntryFlags(content[3]), binary_content, vcn_child_node
-        _MOD_LOGGER.debug("IndexEntry object created successfully")
+def _len_idx_e(self):
+    return self._entry_len
 
-        return nw_obj
+_docstring_idx_e = '''Represents an entry in the index.
 
-    def __len__(self):
-        '''Get the actual size of the content, as some attributes have variable sizes'''
-        return self._entry_len
+An Index, from the MFT perspective is composed of multiple entries. This class
+represents these entries. Normally entries contain a FILENAME attribute.
+Note the entry can have other types of content, for these cases the class
+saves the raw bytes
 
-    def __eq__(self, other):
-        if isinstance(other, IndexEntry):
-            return self.generic == other.generic \
-                and self._entry_len == other._entry_len \
-                and self.content_len == other.content_len \
-                and self.flags == other.flags and self.content == other.content \
-                and self.vcn_child_node == other.vcn_child_node
-        return False
+Note:
+    This class receives an Iterable as argument, the "Parameters/Args" section
+    represents what must be inside the Iterable. The Iterable MUST preserve
+    order or things might go boom.
 
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return f'{self.__class__.__name__}(generic={self.generic}, _entry_len={self._entry_len}, content_len={self.content_len}, flags={str(self.flags)}, content={self.content}, vcn_child_node={self.vcn_child_node})'
+Args:
+    content[0] (int): File reference?
+    content[1] (int): Length of the entry
+    content[2] (int): Length of the content
+    content[3] (:obj:`IndexEntryFlags`): Flags
+    content[4] (:obj:`FileName` or bytes): Content of the entry
+    content[5] (int): VCN child node
 
-class IndexRoot(AttributeContentRepr):
-    '''Represents the content of a INDEX_ROOT attribute.
+Attributes:
+    generic (int): File reference?
+    content_len (int): Length of the content
+    flags (:obj:`IndexEntryFlags`): Flags
+    content (:obj:`FileName` or bytes): Content of the entry
+    vcn_child_node (int): VCN child node
+'''
 
-    The structure of an index is a B+ tree, as such an root is always present.
+_idx_e_namespace = {"__len__" : _len_idx_e,
+                    "_REPR_VCN" : struct.Struct("<Q"),
+                    "create_from_binary" : classmethod(_from_binary_idx_e)
+                 }
 
-    Note:
-        This class receives an Iterable as argument, the "Parameters/Args" section
-        represents what must be inside the Iterable. The Iterable MUST preserve
-        order or things might go boom.
+IndexEntry = _create_attrcontent_class("IndexEntry",
+            ("generic", "_entry_len", "content_len", "flags", "content", "vcn_child_node"),
+        inheritance=(AttributeContentRepr,), data_structure="<Q2HI",
+        extra_functions=_idx_e_namespace, docstring=_docstring_idx_e)
 
-    Args:
-        content[0] (:obj:`AttrTypes`): Attribute type
-        content[1] (:obj:`CollationRule`): Collation rule
-        content[2] (int): Index record size in bytes
-        content[3] (int): Index record size in clusters
-        node_header (IndexNodeHeader) - Node header related to this index root
-        idx_entry_list (list(IndexEntry))- List of index entries that belong to
-            this index root
+#------------------------------------------------------------------------------
 
-    Attributes:
-        attr_type (:obj:`AttrTypes`): Attribute type
-        collation_rule (:obj:`CollationRule`): Collation rule
-        index_len_in_bytes (int): Index record size in bytes
-        index_len_in_cluster (int): Index record size in clusters
-        node_header (IndexNodeHeader): Node header related to this index root
-        index_entry_list (list(IndexEntry)): List of index entries that belong to
-    '''
 
-    _REPR = struct.Struct("<3IB3x")
+def _from_binary__idx_root(cls, binary_stream):
+    """See base class."""
     ''' Attribute type - 4
         Collation rule - 4
         Bytes per index record - 4
         Clusters per index record - 1
         Padding - 3
     '''
+    attr_type, collation_rule, b_per_idx_r, c_per_idx_r = cls._REPR.unpack(binary_stream[:cls._REPR.size])
+    node_header = IndexNodeHeader.create_from_binary(binary_stream[cls._REPR.size:])
+    attr_type = AttrTypes(attr_type) if attr_type else None
+    index_entry_list = []
 
-    def __init__(self, content=(None,)*4, node_header=None, idx_entry_list=None):
-        """Check class docstring"""
-        self.attr_type, self.collation_rule, self.index_len_in_bytes, \
-        self.index_len_in_cluster = content
-        self.node_header = node_header
-        self.index_entry_list = idx_entry_list
+    offset = cls._REPR.size + node_header.start_offset
+    #loads all index entries related to the root node
+    while True:
+        entry = IndexEntry.create_from_binary(binary_stream[offset:], attr_type)
+        index_entry_list.append(entry)
+        if entry.flags & IndexEntryFlags.LAST_ENTRY:
+            break
+        else:
+            offset += len(entry)
 
-    @classmethod
-    def get_representation_size(cls):
-        """See base class."""
-        return cls._REPR.size
+    nw_obj = cls((attr_type, CollationRule(collation_rule), b_per_idx_r,
+                    c_per_idx_r, node_header, index_entry_list ))
 
-    @classmethod
-    def create_from_binary(cls, binary_view):
-        """See base class."""
-        content = cls._REPR.unpack(binary_view[:cls._REPR.size])
-        nw_obj = cls()
-        nw_obj.node_header = IndexNodeHeader.create_from_binary(binary_view[cls._REPR.size:])
-        index_entry_list = []
-        attr_type = AttrTypes(content[0]) if content[0] else None
+    _MOD_LOGGER.debug("Attempted to unpack VOLUME_INFORMATION Entry from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
 
-        offset = cls._REPR.size + nw_obj.node_header.start_offset
-        #loads all index entries related to the root node
-        while True:
-            entry = IndexEntry.create_from_binary(binary_view[offset:], attr_type)
-            index_entry_list.append(entry)
-            if entry.flags & IndexEntryFlags.LAST_ENTRY:
-                break
-            else:
-                offset += len(entry)
+    return nw_obj
 
-        nw_obj.index_entry_list = index_entry_list
-        nw_obj.attr_type, nw_obj.collation_rule, nw_obj.index_len_in_bytes, \
-        nw_obj.index_len_in_cluster = attr_type, CollationRule(content[1]), \
-            content[2], content[3]
+def _len_idx_root(self):
+    return IndexRoot._REPR.size
 
-        return nw_obj
 
-    def __len__(self):
-        '''Get the actual size of the content, as some attributes have variable sizes'''
-        return IndexRoot._REPR.size
+_docstring_idx_root = '''Represents the content of a INDEX_ROOT attribute.
 
-    def __eq__(self, other):
-        if isinstance(other, IndexRoot):
-            return self.attr_type == other.attr_type \
-                and self.collation_rule == other.collation_rule \
-                and self.index_len_in_bytes == other.index_len_in_bytes \
-                and self.index_len_in_cluster == other.index_len_in_cluster and self.node_header == other.node_header \
-                and self.index_entry_list == other.index_entry_list
-        return False
+The structure of an index is a B+ tree, as such an root is always present.
 
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(attr_type={!s}, collation_rule={}, index_len_in_bytes={}, index_len_in_cluster={}, node_header={}, index_entry_list={})'.format(
-            self.attr_type, self.collation_rule, self.index_len_in_bytes,
-            self.index_len_in_cluster, self.node_header, self.index_entry_list)
+Note:
+    This class receives an Iterable as argument, the "Parameters/Args" section
+    represents what must be inside the Iterable. The Iterable MUST preserve
+    order or things might go boom.
+
+Args:
+    content[0] (:obj:`AttrTypes`): Attribute type
+    content[1] (:obj:`CollationRule`): Collation rule
+    content[2] (int): Index record size in bytes
+    content[3] (int): Index record size in clusters
+    node_header (IndexNodeHeader) - Node header related to this index root
+    idx_entry_list (list(IndexEntry))- List of index entries that belong to
+        this index root
+
+Attributes:
+    attr_type (:obj:`AttrTypes`): Attribute type
+    collation_rule (:obj:`CollationRule`): Collation rule
+    index_len_in_bytes (int): Index record size in bytes
+    index_len_in_cluster (int): Index record size in clusters
+    node_header (IndexNodeHeader): Node header related to this index root
+    index_entry_list (list(IndexEntry)): List of index entries that belong to
+'''
+
+_idx_root_namespace = {"__len__" : _len_idx_root,
+                    "create_from_binary" : classmethod(_from_binary__idx_root)
+                 }
+
+IndexRoot = _create_attrcontent_class("IndexRoot",
+            ("attr_type", "collation_rule", "index_len_in_bytes", "index_len_in_cluster",
+             "node_header", "index_entry_list"),
+        inheritance=(AttributeContentRepr,), data_structure="<3IB3x",
+        extra_functions=_idx_root_namespace, docstring=_docstring_idx_root)
 
 #******************************************************************************
 # BITMAP ATTRIBUTE
