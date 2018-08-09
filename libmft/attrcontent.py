@@ -1407,32 +1407,9 @@ Ea = _create_attrcontent_class("Ea",
 #******************************************************************************
 # SECURITY_DESCRIPTOR ATTRIBUTE
 #******************************************************************************
-class SecurityDescriptorHeader(AttributeContentRepr):
-    '''Represents the header of the SECURITY_DESCRIPTOR attribute.
 
-    Note:
-        This class receives an Iterable as argument, the "Parameters/Args" section
-        represents what must be inside the Iterable. The Iterable MUST preserve
-        order or things might go boom.
-
-    Args:
-        content[0] (int): Revision number
-        content[1] (:obj:`SecurityDescriptorFlags`): Control flags
-        content[2] (int): Offset to the owner SID
-        content[3] (int): Offset to the group SID
-        content[4] (int): Offset to the DACL
-        content[5] (int): Offset to the SACL
-
-    Attributes:
-        revision_number (int): Revision number
-        control_flags (:obj:`SecurityDescriptorFlags`): Control flags
-        owner_sid_offset (int): Offset to the owner SID
-        group_sid_offset (int): Offset to the group SID
-        dacl_offset (int): Offset to the DACL
-        sacl_offset (int): Offset to the SACL
-    '''
-
-    _REPR = struct.Struct("<B1xH4I")
+def _from_binary_secd_header(cls, binary_stream):
+    """See base class."""
     ''' Revision number - 1
         Padding - 1
         Control flags - 2
@@ -1441,526 +1418,452 @@ class SecurityDescriptorHeader(AttributeContentRepr):
         Reference to the DACL - 4 (offset relative to the header)
         Reference to the SACL - 4 (offset relative to the header)
     '''
+    nw_obj = cls(cls._REPR.unpack(binary_stream))
+    nw_obj.control_flags = SecurityDescriptorFlags(nw_obj.control_flags)
 
-    def __init__(self, content=(None,)*6):
-        """Check class docstring"""
-        self.revision_number, self.control_flags, self.owner_sid_offset,\
-        self.group_sid_offset, self.dacl_offset, self.sacl_offset = content
+    _MOD_LOGGER.debug("Attempted to unpack Security Descriptor Header from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
 
-    @classmethod
-    def get_representation_size(cls):
-        """See base class."""
-        return cls._REPR.size
+    return nw_obj
 
-    @classmethod
-    def create_from_binary(cls, binary_stream):
-        """See base class."""
-        nw_obj = cls(cls._REPR.unpack(binary_stream))
-        nw_obj.control_flags = SecurityDescriptorFlags(nw_obj.control_flags)
+def _len_secd_header(self):
+    '''Returns the logical size of the file'''
+    return SecurityDescriptorHeader._REPR.size
 
-        return nw_obj
+_docstring_secd_header = '''Represents the header of the SECURITY_DESCRIPTOR attribute.
 
-    def __len__(self):
-        '''Returns the logical size of the file'''
-        return SecurityDescriptorHeader._REPR.size
+Note:
+    This class receives an Iterable as argument, the "Parameters/Args" section
+    represents what must be inside the Iterable. The Iterable MUST preserve
+    order or things might go boom.
 
-    def __eq__(self, other):
-        if isinstance(other, SecurityDescriptorHeader):
-            return self.revision_number == other.revision_number \
-                and self.control_flags == other.control_flags \
-                and self.owner_sid_offset == other.owner_sid_offset and self.group_sid_offset == other.group_sid_offset \
-                and self.dacl_offset == other.dacl_offset and self.sacl_offset == other.sacl_offset
-        return False
+Args:
+    content[0] (int): Revision number
+    content[1] (:obj:`SecurityDescriptorFlags`): Control flags
+    content[2] (int): Offset to the owner SID
+    content[3] (int): Offset to the group SID
+    content[4] (int): Offset to the DACL
+    content[5] (int): Offset to the SACL
 
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return f'{self.__class__.__name__}(revision_number={self.revision_number}, control_flags={str(self.control_flags)}, owner_sid_offset={self.owner_sid_offset}, group_sid_offset={self.group_sid_offset}, dacl_offset={self.dacl_offset}, sacl_offset={self.sacl_offset})'
+Attributes:
+    revision_number (int): Revision number
+    control_flags (:obj:`SecurityDescriptorFlags`): Control flags
+    owner_sid_offset (int): Offset to the owner SID
+    group_sid_offset (int): Offset to the group SID
+    dacl_offset (int): Offset to the DACL
+    sacl_offset (int): Offset to the SACL
+'''
 
-class ACEHeader(AttributeContentRepr):
-    '''Represents header of an ACE object.
+_secd_header_namespace = {"__len__" : _len_secd_header,
+                    "create_from_binary" : classmethod(_from_binary_secd_header)
+                 }
 
-    As part of the an ACL, all ACE (Access Control Entry) have a header that
-    is represented by this class.
+SecurityDescriptorHeader = _create_attrcontent_class("SecurityDescriptorHeader",
+            ("revision_number", "control_flags", "owner_sid_offset",
+                "group_sid_offset", "dacl_offset", "sacl_offset"),
+        inheritance=(AttributeContentRepr,), data_structure="<B1xH4I",
+        extra_functions=_secd_header_namespace, docstring=_docstring_secd_header)
 
-    Note:
-        This class receives an Iterable as argument, the "Parameters/Args" section
-        represents what must be inside the Iterable. The Iterable MUST preserve
-        order or things might go boom.
+#------------------------------------------------------------------------------
 
-    Args:
-        content[0] (:obj:`ACEType`): Type of ACE entry
-        content[1] (:obj:`ACEControlFlags`): ACE control flags
-        content[2] (int): size of the ACE entry, including the header
-
-    Attributes:
-        type (:obj:`ACEType`): Type of ACE entry
-        control_flags (:obj:`ACEControlFlags`): ACE control flags
-        ace_size (int): size of the ACE entry, including the header
-    '''
-    _REPR = struct.Struct("<2BH")
+def _from_binary_ace_header(cls, binary_stream):
+    """See base class."""
     ''' ACE Type - 1
         ACE Control flags - 1
         Size - 2 (includes header size)
     '''
+    type, control_flags, size = cls._REPR.unpack(binary_stream)
+    nw_obj = cls((ACEType(type), ACEControlFlags(control_flags), size))
 
-    def __init__(self, content=(None,)*3):
-        """Check class docstring"""
-        self.type, self.control_flags, self.ace_size = content
+    _MOD_LOGGER.debug("Attempted to unpack ACE Header from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
 
-    @classmethod
-    def get_representation_size(cls):
-        """See base class."""
-        return cls._REPR.size
+    return nw_obj
 
-    @classmethod
-    def create_from_binary(cls, binary_stream):
-        """See base class."""
-        nw_obj = cls()
-        content = cls._REPR.unpack(binary_stream)
+def _len_ace_header(self):
+    '''Returns the logical size of the file'''
+    return ACEHeader._REPR.size
 
-        nw_obj.type, nw_obj.control_flags, nw_obj.ace_size, = ACEType(content[0]), \
-            ACEControlFlags(content[1]), content[2]
+_docstring_ace_header = '''Represents header of an ACE object.
 
-        return nw_obj
+As part of the an ACL, all ACE (Access Control Entry) have a header that
+is represented by this class.
 
-    def __len__(self):
-        '''Returns the logical size of the file'''
-        return ACEHeader._REPR.size
+Note:
+    This class receives an Iterable as argument, the "Parameters/Args" section
+    represents what must be inside the Iterable. The Iterable MUST preserve
+    order or things might go boom.
 
-    def __eq__(self, other):
-        if isinstance(other, ACEHeader):
-            return self.type == other.type \
-                and self.control_flags == other.control_flags \
-                and self.ace_size == other.ace_size
-        return False
+Args:
+    content[0] (:obj:`ACEType`): Type of ACE entry
+    content[1] (:obj:`ACEControlFlags`): ACE control flags
+    content[2] (int): size of the ACE entry, including the header
 
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return f'{self.__class__.__name__}(type={self.type}, control_flags={str(self.control_flags)}, ace_size={str(self.ace_size)})'
+Attributes:
+    type (:obj:`ACEType`): Type of ACE entry
+    control_flags (:obj:`ACEControlFlags`): ACE control flags
+    ace_size (int): size of the ACE entry, including the header
+'''
 
-class SID(AttributeContentRepr):
-    '''Represents the content of a SID object to be used by the SECURITY_DESCRIPTOR
-    attribute.
+_ace_header_namespace = {"__len__" : _len_ace_header,
+                    "create_from_binary" : classmethod(_from_binary_ace_header)
+                 }
 
-    This represents a Microsoft SID, normally seen as::
+ACEHeader = _create_attrcontent_class("ACEHeader",
+            ("type", "control_flags", "ace_size"),
+        inheritance=(AttributeContentRepr,), data_structure="<2BH",
+        extra_functions=_ace_header_namespace, docstring=_docstring_ace_header)
 
-        S-1-5-21-7623811015-3361044348-030300820-1013
+#-------------------------------------------------------------------------------
 
-    Note:
-        This class receives an Iterable as argument, the "Parameters/Args" section
-        represents what must be inside the Iterable. The Iterable MUST preserve
-        order or things might go boom.
-
-    Args:
-        content[0] (int): Revision number
-        content[1] (int): Number of sub authorities
-        content[2] (int): Authority
-        sub_authorities (list(int)): List of sub authorities
-
-    Attributes:
-        revision_number (int): Revision number
-        authority (int): Authority
-        sub_authorities (list(int)): List of sub authorities
-    '''
-    _REPR = struct.Struct("<2B6s")
+def _from_binary_sid(cls, binary_stream):
+    """See base class."""
     ''' Revision number - 1
         Number of sub authorities - 1
         Authority - 6
         Array of 32 bits with sub authorities - 4 * number of sub authorities
     '''
+    rev_number, sub_auth_len, auth = cls._REPR.unpack(binary_stream[:cls._REPR.size])
+    if sub_auth_len:
+        sub_auth_repr = struct.Struct("<" + str(sub_auth_len) + "I")
+        sub_auth = sub_auth_repr.unpack(binary_stream[cls._REPR.size:cls._REPR.size + sub_auth_repr.size])
+    else:
+        sub_auth = ()
 
-    def __init__(self, content=(None,)*3, sub_authorities=None):
-        """Check class docstring"""
-        self.revision_number, _, self.authority = content
-        self.sub_authorities = sub_authorities
+    nw_obj = cls((rev_number, int.from_bytes(auth, byteorder="big"), sub_auth))
 
-    def _get_sub_authority_len(self):
-        return len(self.sub_authorities)
+    _MOD_LOGGER.debug("Attempted to unpack SID from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
 
-    #the name length can derived from the name, so, we don't need to keep in memory
-    sub_auth_len = property(_get_sub_authority_len, doc='Quantity of sub authorities')
+    return nw_obj
 
-    @classmethod
-    def get_representation_size(cls):
-        """See base class."""
-        return cls._REPR.size
+def _len_sid(self):
+    '''Returns the size of the SID in bytes'''
+    return SID._REPR.size + (4 * sub_auth_len)
 
-    @classmethod
-    def create_from_binary(cls, binary_stream):
-        """See base class."""
-        content = cls._REPR.unpack(binary_stream[:cls._REPR.size])
-        if content[1]:
-            sub_auth_repr = struct.Struct("<" + str(content[1]) + "I")
-            sub_auth = sub_auth_repr.unpack(binary_stream[cls._REPR.size:cls._REPR.size + sub_auth_repr.size])
-        else:
-            sub_auth = ()
+def _str_sid(self):
+    'Return a nicely formatted representation string'
+    sub_auths = "-".join([str(sub) for sub in self.sub_authorities])
+    return f'S-{self.revision_number}-{self.authority}-{sub_auths}'
 
-        nw_obj = cls(content, sub_auth)
-        nw_obj.authority = int.from_bytes(content[2], byteorder="big")
+_docstring_sid = '''Represents the content of a SID object to be used by the SECURITY_DESCRIPTOR
+attribute.
 
-        return nw_obj
+This represents a Microsoft SID, normally seen as::
 
-    def __len__(self):
-        '''Returns the size of the SID in bytes'''
-        return SID._REPR.size + (4 * sub_auth_len)
+    S-1-5-21-7623811015-3361044348-030300820-1013
 
-    def __eq__(self, other):
-        if isinstance(other, SID):
-            return self.revision_number == other.revision_number \
-                and self.authority == other.authority \
-                and self.sub_authorities == other.sub_authorities
-        return False
+Note:
+    This class receives an Iterable as argument, the "Parameters/Args" section
+    represents what must be inside the Iterable. The Iterable MUST preserve
+    order or things might go boom.
 
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f'(revision_number={self.revision_number}, sub_auth_len={self.sub_auth_len}, authority={self.authority}, sub_authorities={self.sub_authorities})'
+Args:
+    content[0] (int): Revision number
+    content[1] (int): Number of sub authorities
+    content[2] (int): Authority
+    sub_authorities (list(int)): List of sub authorities
 
-    def __str__(self):
-        'Return a nicely formatted representation string'
-        sub_auths = "-".join([str(sub) for sub in self.sub_authorities])
-        return f'S-{self.revision_number}-{self.authority}-{sub_auths}'
+Attributes:
+    revision_number (int): Revision number
+    authority (int): Authority
+    sub_authorities (list(int)): List of sub authorities
+'''
 
-class BasicACE(AttributeContentRepr):
-    '''Represents one the types of ACE entries. The Basic type.
+_sid_namespace = {"__len__" : _len_sid,
+                    "create_from_binary" : classmethod(_from_binary_sid),
+                    "__str__" : _str_sid
+                 }
 
-    The Basic ACE is a very simple entry that contains the access flags for a
-    particular SID.
+SID = _create_attrcontent_class("SID",
+            ("revision_number", "authority", "sub_authorities"),
+        inheritance=(AttributeContentRepr,), data_structure="<2B6s",
+        extra_functions=_sid_namespace, docstring=_docstring_sid)
 
-    Note:
-        This class receives an Iterable as argument, the "Parameters/Args" section
-        represents what must be inside the Iterable. The Iterable MUST preserve
-        order or things might go boom.
+#-------------------------------------------------------------------------------
 
-    Args:
-        content[0] (:obj:`ACEAccessFlags`): Access rights flags
-        content[1] (:obj:`SID`): SID
-
-        self.access_rights_flags, self.sid
-
-    Attributes:
-        access_rights_flags (:obj:`ACEAccessFlags`): Access rights flags
-        sid (:obj:`SID`): SID
-    '''
-
-    _REPR = struct.Struct("<I")
+def _from_binary_b_ace(cls, binary_stream):
+    """See base class."""
     ''' Access rights flags - 4
         SID - n
     '''
+    access_flags = cls._REPR.unpack(binary_stream[:cls._REPR.size])[0]
+    sid = SID.create_from_binary(binary_stream[cls._REPR.size:])
 
-    def __init__(self, content=(None,)*2):
-        """Check class docstring"""
-        self.access_rights_flags, self.sid = content
+    nw_obj = cls((ACEAccessFlags(access_flags), sid))
 
-    @classmethod
-    def get_representation_size(cls):
-        """See base class."""
-        return cls._REPR.size
+    return nw_obj
 
-    @classmethod
-    def create_from_binary(cls, binary_stream):
-        """See base class."""
-        access_flags = cls._REPR.unpack(binary_stream[:cls._REPR.size])[0]
-        sid = SID.create_from_binary(binary_stream[cls._REPR.size:])
+def _len_b_ace(self):
+    '''Returns the logical size of the file'''
+    return BasicACE._REPR.size
 
-        nw_obj = cls((ACEAccessFlags(access_flags), sid))
+_docstring_b_ace = '''Represents one the types of ACE entries. The Basic type.
 
-        return nw_obj
+The Basic ACE is a very simple entry that contains the access flags for a
+particular SID.
 
-    def __len__(self):
-        '''Returns the logical size of the file'''
-        return BasicACE._REPR.size
+Note:
+    This class receives an Iterable as argument, the "Parameters/Args" section
+    represents what must be inside the Iterable. The Iterable MUST preserve
+    order or things might go boom.
 
-    def __eq__(self, other):
-        if isinstance(other, BasicACE):
-            return self.access_rights_flags == other.access_rights_flags \
-                and self.sid == other.sid
-        return False
+Args:
+    content[0] (:obj:`ACEAccessFlags`): Access rights flags
+    content[1] (:obj:`SID`): SID
 
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f'(access_rights_flags={str(self.access_rights_flags)}, sid={str(self.sid)})'
+    self.access_rights_flags, self.sid
 
-class ObjectACE(AttributeContentRepr):
-    '''Represents one the types of ACE entries. The Object type.
+Attributes:
+    access_rights_flags (:obj:`ACEAccessFlags`): Access rights flags
+    sid (:obj:`SID`): SID
+'''
 
-    This is a more complex type of ACE that contains the access flags, a group
-    of undocumented flags, the object id and its inherited object id and the SID
-    where it is applicable.
+_b_ace_namespace = {"__len__" : _len_b_ace,
+                    "create_from_binary" : classmethod(_from_binary_b_ace)
+                 }
 
-    Note:
-        This class receives an Iterable as argument, the "Parameters/Args" section
-        represents what must be inside the Iterable. The Iterable MUST preserve
-        order or things might go boom.
+BasicACE = _create_attrcontent_class("BasicACE",
+            ("access_rights_flags", "SID"),
+        inheritance=(AttributeContentRepr,), data_structure="<I",
+        extra_functions=_b_ace_namespace, docstring=_docstring_b_ace)
 
-    Args:
-        content[0] (:obj:`ACEAccessFlags`): Access rights flags
-        content[1] (int): Flags
-        content[2] (:obj:`UUID`): Object type class identifier (GUID)
-        content[3] (:obj:`UUID`): Inherited object type class identifier (GUID)
-        content[4] (:obj:`SID`): SID
+#-------------------------------------------------------------------------------
 
-    Attributes:
-        access_rights_flags (:obj:`ACEAccessFlags`): Access rights flags
-        flags (int): Flags
-        object_guid (:obj:`UUID`): Object type class identifier (GUID)
-        inherited_guid (:obj:`UUID`): Inherited object type class identifier (GUID)
-        sid (:obj:`SID`): SID
-    '''
-
-    _REPR = struct.Struct("<2I16s16s")
+def _from_binary_obj_ace(cls, binary_stream):
+    """See base class."""
     ''' Access rights flags - 4
         Flags - 4
         Object type class identifier (GUID) - 16
         Inherited object type class identifier (GUID) - 16
         SID - n
     '''
+    #content = cls._REPR.unpack(binary_stream[:cls._REPR.size])
+    access_flags, flags, object_guid, inher_guid = cls._REPR.unpack(binary_stream[:cls._REPR.size])
+    sid = SID.create_from_binary(binary_stream[cls._REPR.size:])
 
-    def __init__(self, content=(None,)*5):
-        """Check class docstring"""
-        self.access_rights_flags, self.flags, self.object_guid,
-        self.inherited_guid, self.sid = content
+    nw_obj = cls((ACEAccessFlags(access_flags),flags, UUID(bytes_le=object_guid), UUID(bytes_le=inher_guid), sid))
 
-    @classmethod
-    def get_representation_size(cls):
-        """See base class."""
-        return cls._REPR.size
+    return nw_obj
 
-    @classmethod
-    def create_from_binary(cls, binary_stream):
-        """See base class."""
-        content = cls._REPR.unpack(binary_stream[cls._HEADER_SIZE:cls._HEADER_SIZE + cls._REPR.size])
-        sid = SID.create_from_binary(binary_stream[cls._HEADER_SIZE + cls._REPR.size:])
+def _len_obj_ace(self):
+    '''Returns the logical size of the file'''
+    return ObjectACE._REPR.size + len(self.sid)
 
-        nw_obj = cls((ACEAccessFlags(content[0]), content[1], UUID(bytes_le=content[2]), UUID(bytes_le=content[3]), sid))
+_docstring_obj_ace = '''Represents one the types of ACE entries. The Object type.
 
-        return nw_obj
+This is a more complex type of ACE that contains the access flags, a group
+of undocumented flags, the object id and its inherited object id and the SID
+where it is applicable.
 
-    def __len__(self):
-        '''Returns the logical size of the file'''
-        return ObjectACE._REPR.size + len(self.sid)
+Note:
+    This class receives an Iterable as argument, the "Parameters/Args" section
+    represents what must be inside the Iterable. The Iterable MUST preserve
+    order or things might go boom.
 
-    def __eq__(self, other):
-        if isinstance(other, ObjectACE):
-            return self.access_rights_flags == other.access_rights_flags \
-                and self.flags == other.flags and self.object_guid == other.object_guid \
-                and self.inherited_guid == other.inherited_guid and self.sid == other.sid
-        return False
+Args:
+    content[0] (:obj:`ACEAccessFlags`): Access rights flags
+    content[1] (int): Flags
+    content[2] (:obj:`UUID`): Object type class identifier (GUID)
+    content[3] (:obj:`UUID`): Inherited object type class identifier (GUID)
+    content[4] (:obj:`SID`): SID
 
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return f'{self.__class__.__name__}(access_rights_flags={self.access_rights_flags}, flags={self.flags}, object_guid={self.object_guid}, inherited_guid={self.inherited_guid}, sid={self.sid})'
+Attributes:
+    access_rights_flags (:obj:`ACEAccessFlags`): Access rights flags
+    flags (int): Flags
+    object_guid (:obj:`UUID`): Object type class identifier (GUID)
+    inherited_guid (:obj:`UUID`): Inherited object type class identifier (GUID)
+    sid (:obj:`SID`): SID
+'''
+
+_obj_ace_namespace = {"__len__" : _len_b_ace,
+                    "create_from_binary" : classmethod(_from_binary_b_ace)
+                 }
+
+ObjectACE = _create_attrcontent_class("ObjectACE",
+            ("access_rights_flags", "flags", "object_guid", "inherited_guid", "sid"),
+        inheritance=(AttributeContentRepr,), data_structure="<2I16s16s",
+        extra_functions=_obj_ace_namespace, docstring=_docstring_obj_ace)
+
+#-------------------------------------------------------------------------------
 
 class CompoundACE():
     '''Nobody knows this structure'''
     pass
 
-class ACE(AttributeContentNoRepr):
-    '''Represents an ACE object.
+#-------------------------------------------------------------------------------
 
-    This class aggregates all the information about an ACE (Access Control Entry).
-    Its header, if it is an Object or Basic ACE.
+def _from_binary_ace(cls, binary_stream):
+    nw_obj = cls()
+    header = ACEHeader.create_from_binary(binary_stream[:cls._HEADER_SIZE])
 
-    Important:
-        The class should never have both basic ace and object ace attributes.
+    nw_obj.header = header
 
-    Note:
-        This class receives an Iterable as argument, the "Parameters/Args" section
-        represents what must be inside the Iterable. The Iterable MUST preserve
-        order or things might go boom.
+    #TODO create a _dispatcher and replace this slow ass comparison
+    if "OBJECT" in header.type.name:
+        nw_obj.object_ace = ObjectACE.create_from_binary(binary_stream[cls._HEADER_SIZE:])
+    elif "COMPOUND" in header.type.name:
+        pass
+    else:
+        nw_obj.basic_ace = BasicACE.create_from_binary(binary_stream[cls._HEADER_SIZE:])
 
-    Args:
-        content[0] (:obj:`ACEHeader`): Created timestamp
-        content[1] (:obj:`BasicACE`): Changed timestamp
-        content[2] (:obj:`ObjectACE`): MFT change timestamp
+    return nw_obj
 
-    Attributes:
-        header (:obj:`ACEHeader`): Created timestamp
-        basic_ace (:obj:`BasicACE`): Changed timestamp
-        object_ace (:obj:`ObjectACE`): MFT change timestamp
-    '''
+def _len_ace(self):
+    '''Returns the logical size of the file'''
+    return self.header.ace_size
 
-    _HEADER_SIZE = ACEHeader.get_representation_size()
+_docstring_ace = '''Represents an ACE object.
 
-    def __init__(self, content=(None,)*3):
-        """Check class docstring"""
-        self.header, self.basic_ace, self.object_ace = content
+This class aggregates all the information about an ACE (Access Control Entry).
+Its header, if it is an Object or Basic ACE.
 
-    @classmethod
-    def create_from_binary(cls, binary_stream):
-        nw_obj = cls()
-        header = ACEHeader.create_from_binary(binary_stream[:cls._HEADER_SIZE])
+Important:
+    The class should never have both basic ace and object ace attributes.
 
-        nw_obj.header = header
+Note:
+    This class receives an Iterable as argument, the "Parameters/Args" section
+    represents what must be inside the Iterable. The Iterable MUST preserve
+    order or things might go boom.
 
-        #TODO create a _dispatcher and replace this slow ass comparison
-        if "OBJECT" in header.type.name:
-            nw_obj.object_ace = ObjectACE.create_from_binary(binary_stream[cls._HEADER_SIZE:])
-        elif "COMPOUND" in header.type.name:
-            pass
-        else:
-            nw_obj.basic_ace = BasicACE.create_from_binary(binary_stream[cls._HEADER_SIZE:])
+Args:
+    content[0] (:obj:`ACEHeader`): Created timestamp
+    content[1] (:obj:`BasicACE`): Changed timestamp
+    content[2] (:obj:`ObjectACE`): MFT change timestamp
 
-        return nw_obj
+Attributes:
+    header (:obj:`ACEHeader`): Created timestamp
+    basic_ace (:obj:`BasicACE`): Changed timestamp
+    object_ace (:obj:`ObjectACE`): MFT change timestamp
+'''
 
-    def __len__(self):
-        '''Returns the logical size of the file'''
-        return self.header.ace_size
+_ace_namespace = {"__len__" : _len_ace,
+                  "create_from_binary" : classmethod(_from_binary_ace),
+                  "_HEADER_SIZE" : ACEHeader.get_representation_size(),
+                 }
 
-    def __eq__(self, other):
-        if isinstance(other, ACE):
-            return self.header == other.header \
-                and self.basic_ace == other.basic_ace and self.object_ace == other.object_ace
-        return False
+ACE = _create_attrcontent_class("ACE",
+            ("header", "basic_ace", "object_ace"),
+        inheritance=(AttributeContentNoRepr,), data_structure=None,
+        extra_functions=_ace_namespace, docstring=_docstring_ace)
 
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f"(header={self.header}, basic_ace={self.basic_ace}, object_ace={self.object_ace})"
+#-------------------------------------------------------------------------------
 
-class ACL(AttributeContentRepr):
-    '''Represents an ACL for the SECURITY_DESCRIPTOR.
-
-    Represents a Access Control List (ACL), which contains multiple ACE entries.
-
-    Note:
-        This class receives an Iterable as argument, the "Parameters/Args" section
-        represents what must be inside the Iterable. The Iterable MUST preserve
-        order or things might go boom.
-
-    Args:
-        content[0] (:obj:`datetime`): Revision number
-        content[1] (int): Size
-        content[2] (int): Number of ACE entries
-        aces (list(:obj:`ACE`)): MFT change timestamp
-
-    Attributes:
-        revision_number[0] (:obj:`datetime`): Revision number
-        size (int): Size
-        aces (list(:obj:`ACE`)): MFT change timestamp
-    '''
-
-    _REPR = struct.Struct("<B1x2H2x")
+def _from_binary_acl(cls, binary_stream):
+    """See base class."""
     ''' Revision number - 1
         Padding - 1
         Size - 2
         ACE Count - 2
         Padding - 2
     '''
+    rev_number, size, ace_len = cls._REPR.unpack(binary_stream[:cls._REPR.size])
+    #content = cls._REPR.unpack(binary_stream[:cls._REPR.size])
+    aces = []
 
-    def __init__(self, content=(None,)*3, aces=None):
-        """Check class docstring"""
-        self.revision_number, self.size, _ = content
-        self.aces = aces
+    offset = cls._REPR.size
+    for i in range(ace_len):
+        ace = ACE.create_from_binary(binary_stream[offset:])
+        offset += len(ace)
+        aces.append(ace)
+        _MOD_LOGGER.debug("Next ACE offset = %d", offset)
+    nw_obj = cls((rev_number, size, aces))
 
-    def _get_aces_len(self):
-        return len(self.aces)
+    _MOD_LOGGER.debug("Attempted to unpack SID from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
 
-    #the name length can derived from the name, so, we don't need to keep in memory
-    aces_len = property(_get_aces_len, doc='Quantity of ACE objects')
+    return nw_obj
 
-    @classmethod
-    def get_representation_size(cls):
-        """See base class."""
-        return cls._REPR.size
+def _len_acl(self):
+    '''Returns the logical size of the file'''
+    return self.size
 
-    @classmethod
-    def create_from_binary(cls, binary_stream):
-        """See base class."""
-        content = cls._REPR.unpack(binary_stream[:cls._REPR.size])
-        aces = []
+_docstring_acl = '''Represents an ACL for the SECURITY_DESCRIPTOR.
 
-        offset = cls._REPR.size
-        for i in range(content[2]):
-            ace = ACE.create_from_binary(binary_stream[offset:])
-            offset += len(ace)
-            aces.append(ace)
-            _MOD_LOGGER.debug("Next ACE offset = %d", offset)
+Represents a Access Control List (ACL), which contains multiple ACE entries.
 
-        if len(aces) != content[2]:
-            raise ContentError("Number of processed ACE entries different than expected.")
+Note:
+    This class receives an Iterable as argument, the "Parameters/Args" section
+    represents what must be inside the Iterable. The Iterable MUST preserve
+    order or things might go boom.
 
-        nw_obj = cls(content, aces)
+Args:
+    content[0] (:obj:`datetime`): Revision number
+    content[1] (int): Size
+    content[2] (int): Number of ACE entries
+    aces (list(:obj:`ACE`)): MFT change timestamp
 
-        return nw_obj
+Attributes:
+    revision_number[0] (:obj:`datetime`): Revision number
+    size (int): Size
+    aces (list(:obj:`ACE`)): MFT change timestamp
+'''
 
-    def __len__(self):
-        '''Returns the logical size of the file'''
-        return self.size
+_acl_namespace = {"__len__" : _len_acl,
+                    "create_from_binary" : classmethod(_from_binary_acl)
+                 }
 
-    def __eq__(self, other):
-        if isinstance(other, ACL):
-            return self.revision_number == other.revision_number \
-                and self.size == other.size and self.aces == other.aces
-        return False
+ACL = _create_attrcontent_class("ACL",
+            ("revision_number", "size", "aces"),
+        inheritance=(AttributeContentRepr,), data_structure="<B1x2H2x",
+        extra_functions=_acl_namespace, docstring=_docstring_acl)
 
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return f'{self.__class__.__name__}(revision_number={self.revision_number}, size={self.size}, aces_len={self.aces_len}, aces={self.aces})'
+#-------------------------------------------------------------------------------
 
-class SecurityDescriptor(AttributeContentNoRepr):
-    '''Represents the content of a SECURITY_DESCRIPTOR attribute.
+def _from_binary_sec_desc(cls, binary_stream):
+    """See base class."""
+    header = SecurityDescriptorHeader.create_from_binary(binary_stream[:SecurityDescriptorHeader.get_representation_size()])
 
-    The Security Descriptor in Windows has a header, an owner SID and group SID, plus a
-    discretionary access control list (DACL) and a system access control list (SACL).
+    owner_sid = SID.create_from_binary(binary_stream[header.owner_sid_offset:])
+    group_sid = SID.create_from_binary(binary_stream[header.group_sid_offset:])
+    dacl = None
+    sacl = None
 
-    Both DACL and SACL are ACLs with the same format.
+    if header.sacl_offset:
+        sacl = ACL.create_from_binary(binary_stream[header.sacl_offset:])
+    if header.dacl_offset:
+        dacl = ACL.create_from_binary(binary_stream[header.dacl_offset:])
 
-    Note:
-        This class receives an Iterable as argument, the "Parameters/Args" section
-        represents what must be inside the Iterable. The Iterable MUST preserve
-        order or things might go boom.
-
-    Args:
-        content[0] (:obj:`SecurityDescriptorHeader`): Created timestamp
-        content[1] (:obj:`SID`): Changed timestamp
-        content[2] (:obj:`SID`): MFT change timestamp
-        content[3] (:obj:`ACL`): Accessed timestamp
-        content[4] (:obj:`ACL`): Accessed timestamp
-
-    Attributes:
-        header (:obj:`SecurityDescriptorHeader`): Created timestamp
-        owner_sid (:obj:`SID`): Changed timestamp
-        group_sid (:obj:`SID`): MFT change timestamp
-        sacl (:obj:`ACL`): Accessed timestamp
-        dacl (:obj:`ACL`): Accessed timestamp
-    '''
-    def __init__(self, content=(None,)*5):
-        """Check class docstring"""
-        self.header, self.owner_sid, self.group_sid, self.sacl, self.dacl = content
-
-    @classmethod
-    def create_from_binary(cls, binary_stream):
-        """See base class."""
-        header = SecurityDescriptorHeader.create_from_binary(binary_stream[:SecurityDescriptorHeader.get_representation_size()])
-
-        owner_sid = SID.create_from_binary(binary_stream[header.owner_sid_offset:])
-        group_sid = SID.create_from_binary(binary_stream[header.group_sid_offset:])
-        dacl = None
-        sacl = None
-
-        if header.sacl_offset:
-            sacl = ACL.create_from_binary(binary_stream[header.sacl_offset:])
-        if header.dacl_offset:
-            dacl = ACL.create_from_binary(binary_stream[header.dacl_offset:])
-
-        nw_obj = cls((header, owner_sid, group_sid, sacl, dacl))
-
-        return nw_obj
+    nw_obj = cls((header, owner_sid, group_sid, sacl, dacl))
+    print(nw_obj)
+    return nw_obj
 
 
-    def __len__(self):
-        '''Returns the logical size of the file'''
-        return len(self.header) + len(self.owner_sid) + len(self.group_sid) + len(self.sacl) + len(self.dacl)
+def _len_sec_desc(self):
+    '''Returns the logical size of the file'''
+    return len(self.header) + len(self.owner_sid) + len(self.group_sid) + len(self.sacl) + len(self.dacl)
 
-    def __eq__(self, other):
-        if isinstance(other, SecurityDescriptor):
-            return self.header == other.header and self.owner_sid == other.owner_sid \
-                and self.group_sid == other.group_sid and self.sacl == other.sacl \
-                and self.dacl == other.dacl
-        return False
+_docstring_sec_desc = '''Represents the content of a SECURITY_DESCRIPTOR attribute.
 
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f"(header={self.header}, owner_sid={str(self.owner_sid)}, group_sid={str(self.group_sid)}, sacl={str(self.sacl)}, dacl={str(self.dacl)})"
+The Security Descriptor in Windows has a header, an owner SID and group SID, plus a
+discretionary access control list (DACL) and a system access control list (SACL).
+
+Both DACL and SACL are ACLs with the same format.
+
+Note:
+    This class receives an Iterable as argument, the "Parameters/Args" section
+    represents what must be inside the Iterable. The Iterable MUST preserve
+    order or things might go boom.
+
+Args:
+    content[0] (:obj:`SecurityDescriptorHeader`): Created timestamp
+    content[1] (:obj:`SID`): Changed timestamp
+    content[2] (:obj:`SID`): MFT change timestamp
+    content[3] (:obj:`ACL`): Accessed timestamp
+    content[4] (:obj:`ACL`): Accessed timestamp
+
+Attributes:
+    header (:obj:`SecurityDescriptorHeader`): Created timestamp
+    owner_sid (:obj:`SID`): Changed timestamp
+    group_sid (:obj:`SID`): MFT change timestamp
+    sacl (:obj:`ACL`): Accessed timestamp
+    dacl (:obj:`ACL`): Accessed timestamp
+'''
+
+_sec_desc_namespace = {"__len__" : _len_sec_desc,
+                    "create_from_binary" : classmethod(_from_binary_sec_desc)
+                 }
+
+SecurityDescriptor = _create_attrcontent_class("SecurityDescriptor",
+            ("header", "owner_sid", "group_sid", "sacl", "dacl"),
+        inheritance=(AttributeContentNoRepr,),
+        extra_functions=_sec_desc_namespace, docstring=_docstring_sec_desc)
 
 #******************************************************************************
 # LOGGED_TOOL_STREAM ATTRIBUTE
