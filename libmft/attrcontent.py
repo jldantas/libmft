@@ -986,229 +986,173 @@ IndexRoot = _create_attrcontent_class("IndexRoot",
 #******************************************************************************
 # BITMAP ATTRIBUTE
 #******************************************************************************
-class Bitmap(AttributeContentNoRepr):
-    '''Represents the content of a BITMAP attribute.
 
-    Correctly represents a bitmap as seen by the MFT. That basically means that
-    the underlying data structure is interpreted bit by bit, where if the bit
-    is 1, the entry is "occupied"/allocated.
+def _allocated_entries_bitmap(self):
+    '''Creates a generator that returns all allocated entries in the
+    bitmap.
 
+    Yields:
+        int: The bit index of the allocated entries.
+
+    '''
+    for entry_number in range(len(self._bitmap) * 8):
+        if self.entry_allocated(entry_number):
+            yield entry_number
+
+def _entry_allocated_bitmap(self, entry_number):
+    """Checks if a particular index is allocated.
 
     Args:
-        binary_data (:obj:`bytes`): The bytes where the data is maintained
-    '''
-    def __init__(self, binary_data):
-        """Check class docstring"""
-        self._bitmap = binary_data
+        entry_number (int): Index to verify
 
-    def allocated_entries(self):
-        '''Creates a generator that returns all allocated entries in the
-        bitmap.
+    Returns:
+        bool: True if it is allocated, False otherwise.
+    """
+    index, offset = divmod(entry_number, 8)
+    return bool(self._bitmap[index] & (1 << offset))
 
-        Yields:
-            int: The bit index of the allocated entries.
+def _get_next_empty_bitmap(self):
+    """Returns the next empty entry.
 
-        '''
-        for entry_number in range(len(self._bitmap) * 8):
-            if self.entry_allocated(entry_number):
-                yield entry_number
+    Returns:
+        int: The value of the empty entry
+    """
+    #TODO probably not the best way, redo
+    for i, byte in enumerate(self._bitmap):
+        if byte != 255:
+            for offset in range(8):
+                if not byte & (1 << offset):
+                    return (i * 8) + offset
 
-    def entry_allocated(self, entry_number):
-        """Checks if a particular index is allocated.
+def _from_binary_bitmap(cls, binary_stream):
+    """See base class."""
+    return cls(binary_stream.tobytes())
 
-        Args:
-            entry_number (int): Index to verify
+def _len_bitmap(self):
+    '''Returns the size of the bitmap in bytes'''
+    return len(self._bitmap)
 
-        Returns:
-            bool: True if it is allocated, False otherwise.
-        """
-        index, offset = divmod(entry_number, 8)
-        return bool(self._bitmap[index] & (1 << offset))
+_docstring_bitmap = """Represents the content of a BITMAP attribute.
 
-    def get_next_empty(self):
-        """Returns the next empty entry.
+Correctly represents a bitmap as seen by the MFT. That basically means that
+the underlying data structure is interpreted bit by bit, where if the bit
+is 1, the entry is "occupied"/allocated.
 
-        Returns:
-            int: The value of the empty entry
-        """
-        #TODO probably not the best way, redo
-        for i, byte in enumerate(self._bitmap):
-            if byte != 255:
-                for offset in range(8):
-                    if not byte & (1 << offset):
-                        return (i * 8) + offset
 
-    @classmethod
-    def create_from_binary(cls, binary_stream):
-        """See base class."""
-        return cls(binary_stream.tobytes())
+Args:
+    binary_data (:obj:`bytes`): The bytes where the data is maintained
+"""
 
-    def __len__(self):
-        '''Returns the size of the bitmap in bytes'''
-        return len(self._bitmap)
+_bitmap_namespace = {"__len__" : _len_bitmap,
+                     "get_next_empty" : _get_next_empty_bitmap,
+                     "entry_allocated" : _entry_allocated_bitmap,
+                     "allocated_entries" : _allocated_entries_bitmap,
+                     "create_from_binary" : classmethod(_from_binary_bitmap)
+                 }
 
-    def __eq__(self, other):
-        if isinstance(other, Bitmap):
-            return self._bitmap == other._bitmap
-        return False
-
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return f'{self.__class__.__name__}(bitmap={self._bitmap})'
+Bitmap = _create_attrcontent_class("Bitmap",
+            ("_bitmap", ),
+        inheritance=(AttributeContentNoRepr,), data_structure=None,
+        extra_functions=_bitmap_namespace, docstring=_docstring_bitmap)
 
 #******************************************************************************
 # REPARSE_POINT ATTRIBUTE
 #******************************************************************************
-class JunctionOrMount(AttributeContentRepr):
-    '''Represents the content of a REPARSE_POINT attribute when it is a junction
-    or mount point.
 
-    Args:
-        target_name (str): Target name
-        print_name (str): Print name
-
-    Attributes:
-        target_name (str): Target name
-        print_name (str): Print name
-    '''
-
-    _REPR = struct.Struct("<4H")
+def _from_binary_junc_mnt(cls, binary_view):
+    """See base class."""
     ''' Offset to target name - 2 (relative to 16th byte)
         Length of target name - 2
         Offset to print name - 2 (relative to 16th byte)
         Length of print name - 2
     '''
+    offset_target_name, len_target_name, offset_print_name, len_print_name = \
+        cls._REPR.unpack(binary_view[:cls._REPR.size])
 
-    def __init__(self, target_name=None, print_name=None):
-        """Check class docstring"""
-        self.target_name, self.print_name = target_name, print_name
+    offset = cls._REPR.size + offset_target_name
+    target_name = binary_view[offset:offset+len_target_name].tobytes().decode("utf_16_le")
+    offset = cls._REPR.size + offset_print_name
+    print_name = binary_view[offset:offset+len_print_name].tobytes().decode("utf_16_le")
 
-    @classmethod
-    def get_representation_size(cls):
-        """See base class."""
-        return cls._REPR.size
+    return cls((target_name, print_name))
 
-    @classmethod
-    def create_from_binary(cls, binary_view):
-        """See base class."""
-        content = cls._REPR.unpack(binary_view[:cls._REPR.size])
+def _len_junc_mnt(self):
+    '''Returns the size of the bitmap in bytes'''
+    return len(self.target_name.encode("utf_16_le")) + len(self.print_nameencode("utf_16_le"))  + 4 #size of offsets
 
-        offset = cls._REPR.size + content[0]
-        target_name = binary_view[offset:offset+content[1]].tobytes().decode("utf_16_le")
-        offset = cls._REPR.size + content[2]
-        print_name = binary_view[offset:offset+content[3]].tobytes().decode("utf_16_le")
+_docstring_junc_mnt = """Represents the content of a REPARSE_POINT attribute when it is a junction
+or mount point.
 
-        return cls(target_name, print_name)
+Args:
+    target_name (str): Target name
+    print_name (str): Print name
 
-    def __len__(self):
-        '''Returns the size of the bitmap in bytes'''
-        return len(self.target_name.encode("utf_16_le")) + len(self.print_nameencode("utf_16_le"))  + 4 #size of offsets
+Attributes:
+    target_name (str): Target name
+    print_name (str): Print name
+"""
 
-    def __eq__(self, other):
-        if isinstance(other, JunctionOrMount):
-            return self.target_name == other.target_name and self.print_name == other.print_name
-        return False
+_junc_mnt_namespace = {"__len__" : _len_junc_mnt,
+                    "create_from_binary" : classmethod(_from_binary_junc_mnt)
+                 }
 
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f'(target_name={self.target_name}, print_name={self.print_name})'
+JunctionOrMount = _create_attrcontent_class("JunctionOrMount",
+            ("target_name", "print_name"),
+        inheritance=(AttributeContentRepr,), data_structure="<4H",
+        extra_functions=_junc_mnt_namespace, docstring=_docstring_junc_mnt)
 
-class SymbolicLink(AttributeContentRepr):
-    '''Represents the content of a REPARSE_POINT attribute when it is a
-    symbolic link.
+#------------------------------------------------------------------------------
 
-    Args:
-        target_name (str): Target name
-        print_name (str): Print name
-        sym_flags (:obj:`SymbolicLinkFlags`): Symbolic link flags
-
-    Attributes:
-        target_name (str): Target name
-        print_name (str): Print name
-        sym_flags (:obj:`SymbolicLinkFlags`): Symbolic link flags
-    '''
-
-    _REPR = struct.Struct("<4HI")
+def _from_binary_syn_link(cls, binary_view):
+    """See base class."""
     ''' Offset to target name - 2 (relative to 16th byte)
         Length of target name - 2
         Offset to print name - 2 (relative to 16th byte)
         Length of print name - 2
         Symbolic link flags - 4
     '''
+    offset_target_name, len_target_name, offset_print_name, \
+    len_print_name, syn_flags = \
+        cls._REPR.unpack(binary_view[:cls._REPR.size])
 
-    def __init__(self, target_name=None, print_name=None, sym_flags=None):
-        """Check class docstring"""
-        self.target_name, self.print_name, self.symbolic_flags = \
-            target_name, print_name, sym_flags
+    offset = cls._REPR.size + offset_target_name
+    target_name = binary_view[offset:len_target_name].tobytes().decode("utf_16_le")
+    offset = cls._REPR.size + offset_print_name
+    print_name = binary_view[offset:offset+len_print_name].tobytes().decode("utf_16_le")
 
-    @classmethod
-    def get_representation_size(cls):
-        """See base class."""
-        return cls._REPR.size
+    return cls((target_name, print_name, SymbolicLinkFlags(syn_flags)))
 
-    @classmethod
-    def create_from_binary(cls, binary_view):
-        """See base class."""
-        content = cls._REPR.unpack(binary_view[:cls._REPR.size])
+def _len_syn_link(self):
+    '''Returns the size of the bitmap in bytes'''
+    return len(self.target_name.encode("utf_16_le")) + len(self.print_nameencode("utf_16_le"))  + 8 #size of offsets + flags
 
-        offset = cls._REPR.size + content[0]
-        target_name = binary_view[offset:offset+content[1]].tobytes().decode("utf_16_le")
-        offset = cls._REPR.size + content[2]
-        print_name = binary_view[offset:offset+content[3]].tobytes().decode("utf_16_le")
+_docstring_syn_link = """Represents the content of a REPARSE_POINT attribute when it is a
+symbolic link.
 
-        return cls(target_name, print_name, SymbolicLinkFlags(content[4]))
+Args:
+    target_name (str): Target name
+    print_name (str): Print name
+    sym_flags (:obj:`SymbolicLinkFlags`): Symbolic link flags
 
-    def __len__(self):
-        '''Returns the size of the bitmap in bytes'''
-        return len(self.target_name.encode("utf_16_le")) + len(self.print_nameencode("utf_16_le"))  + 8 #size of offsets + flags
+Attributes:
+    target_name (str): Target name
+    print_name (str): Print name
+    sym_flags (:obj:`SymbolicLinkFlags`): Symbolic link flags
+"""
 
-    def __eq__(self, other):
-        if isinstance(other, SymbolicLink):
-            return self.target_name == other.target_name and self.print_name == other.print_name \
-                and self.symbolic_flags == other.symbolic_flags
-        return False
+_syn_link_namespace = {"__len__" : _len_syn_link,
+                    "create_from_binary" : classmethod(_from_binary_syn_link)
+                 }
 
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f'(target_name={self.target_name}, print_name={self.print_name}, symbolic_flags={self.symbolic_flags})'
+SymbolicLink = _create_attrcontent_class("SymbolicLink",
+            ("target_name", "print_name", "symbolic_flags"),
+        inheritance=(AttributeContentRepr,), data_structure="<4HI",
+        extra_functions=_syn_link_namespace, docstring=_docstring_junc_mnt)
 
-class ReparsePoint(AttributeContentRepr):
-    '''Represents the content of a REPARSE_POINT attribute.
+#------------------------------------------------------------------------------
 
-    The REPARSE_POINT attribute is a little more complicated. We can have
-    Microsoft predefinied content and third-party content. As expected,
-    this completely changes how the data is interpreted.
-
-    All Microsoft types of REPARSE_POINT can be gathered from the winnt.h file.
-    However, as of now, only two have been implemented:
-
-        * Symbolic Links - SYMLINK
-        * Mount or junction point - MOUNT_POINT
-
-    As for third-party data, this is always saved in raw (bytes).
-
-    Note:
-        This class receives an Iterable as argument, the "Parameters/Args" section
-        represents what must be inside the Iterable. The Iterable MUST preserve
-        order or things might go boom.
-
-    Args:
-        content[0] (:obj:`ReparseType`): Reparse point type
-        content[1] (:obj:`ReparseFlags`): Reparse point flags
-        content[2] (int): Reparse data length
-        content[3] (:obj:`UUID`): GUID
-        content[4] (*variable*): Content of the reparse type
-
-    Attributes:
-        reparse_type (:obj:`ReparseType`): Reparse point type
-        reparse_flags (:obj:`ReparseFlags`): Reparse point flags
-        data_len (int): Reparse data length
-        guid (:obj:`UUID`): GUID. This exists only in the third-party
-            reparse points. If it is a Microsoft one, it defaults to ``None``
-        data (*variable*): Content of the reparse type
-    '''
-
-    _REPR = struct.Struct("<IH2x")
+def _from_binary_reparse(cls, binary_view):
+    """See base class."""
     ''' Reparse type flags - 4
             Reparse tag - 4 bits
             Reserved - 12 bits
@@ -1216,54 +1160,75 @@ class ReparsePoint(AttributeContentRepr):
         Reparse data length - 2
         Padding - 2
     '''
+    #content = cls._REPR.unpack(binary_view[:cls._REPR.size])
+    reparse_tag, data_len = cls._REPR.unpack(binary_view[:cls._REPR.size])
 
-    def __init__(self, content=(None,)*5):
-        """Check class docstring"""
-        self.reparse_type, self.reparse_flags, self.data_len, \
-        self.guid, self.data = content
-
-    @classmethod
-    def get_representation_size(cls):
-        """See base class."""
-        return cls._REPR.size
-
-    @classmethod
-    def create_from_binary(cls, binary_view):
-        """See base class."""
-        content = cls._REPR.unpack(binary_view[:cls._REPR.size])
-        nw_obj = cls()
-
-        #reparse_tag (type, flags) data_len, guid, data
-        nw_obj.reparse_type = ReparseType(content[0] & 0x0000FFFF)
-        nw_obj.reparse_flags = ReparseFlags((content[0] & 0xF0000000) >> 28)
-        guid = None #guid exists only in third party reparse points
-        if nw_obj.reparse_flags & ReparseFlags.IS_MICROSOFT:#a microsoft tag
-            if nw_obj.reparse_type is ReparseType.SYMLINK:
-                data = SymbolicLink.create_from_binary(binary_view[cls._REPR.size:])
-            elif nw_obj.reparse_type is ReparseType.MOUNT_POINT:
-                data = JunctionOrMount.create_from_binary(binary_view[cls._REPR.size:])
-            else:
-                data = binary_view[cls._REPR.size:].tobytes()
+    #reparse_tag (type, flags) data_len, guid, data
+    reparse_type = ReparseType(reparse_tag & 0x0000FFFF)
+    reparse_flags = ReparseFlags((reparse_tag & 0xF0000000) >> 28)
+    guid = None #guid exists only in third party reparse points
+    if reparse_flags & ReparseFlags.IS_MICROSOFT:#a microsoft tag
+        if reparse_type is ReparseType.SYMLINK:
+            data = SymbolicLink.create_from_binary(binary_view[cls._REPR.size:])
+        elif reparse_type is ReparseType.MOUNT_POINT:
+            data = JunctionOrMount.create_from_binary(binary_view[cls._REPR.size:])
         else:
-            guid = UUID(bytes_le=binary_view[cls._REPR.size:cls._REPR.size+16].tobytes())
-            data = binary_view[cls._REPR.size+16:].tobytes()
-        nw_obj.data_len, nw_obj.guid, nw_obj.data = content[1], guid, data
+            data = binary_view[cls._REPR.size:].tobytes()
+    else:
+        guid = UUID(bytes_le=binary_view[cls._REPR.size:cls._REPR.size+16].tobytes())
+        data = binary_view[cls._REPR.size+16:].tobytes()
 
-        return nw_obj
+    nw_obj = cls((reparse_type, reparse_flags, data_len, guid, data))
 
-    def __len__(self):
-        '''Returns the size of the bitmap in bytes'''
-        return ReparsePoint._REPR.size + self.data_len
+    return nw_obj
 
-    def __eq__(self, other):
-        if isinstance(other, ReparsePoint):
-            return self.reparse_type == other.reparse_type and self.reparse_flags == other.reparse_flags \
-                and self.data_len == other.data_len and self.guid == other.guid and self.data == other.data
-        return False
+def _len_reparse(self):
+    '''Returns the size of the bitmap in bytes'''
+    return ReparsePoint._REPR.size + self.data_len
 
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return f'{self.__class__.__name__}(reparse_type={str(self.reparse_type)}, reparse_flags={str(self.reparse_flags)}, data_len={self.data_len}, guid={self.guid}, data={self.data})'
+_docstring_reparse = '''Represents the content of a REPARSE_POINT attribute.
+
+The REPARSE_POINT attribute is a little more complicated. We can have
+Microsoft predefinied content and third-party content. As expected,
+this completely changes how the data is interpreted.
+
+All Microsoft types of REPARSE_POINT can be gathered from the winnt.h file.
+However, as of now, only two have been implemented:
+
+    * Symbolic Links - SYMLINK
+    * Mount or junction point - MOUNT_POINT
+
+As for third-party data, this is always saved in raw (bytes).
+
+Note:
+    This class receives an Iterable as argument, the "Parameters/Args" section
+    represents what must be inside the Iterable. The Iterable MUST preserve
+    order or things might go boom.
+
+Args:
+    content[0] (:obj:`ReparseType`): Reparse point type
+    content[1] (:obj:`ReparseFlags`): Reparse point flags
+    content[2] (int): Reparse data length
+    content[3] (:obj:`UUID`): GUID
+    content[4] (*variable*): Content of the reparse type
+
+Attributes:
+    reparse_type (:obj:`ReparseType`): Reparse point type
+    reparse_flags (:obj:`ReparseFlags`): Reparse point flags
+    data_len (int): Reparse data length
+    guid (:obj:`UUID`): GUID. This exists only in the third-party
+        reparse points. If it is a Microsoft one, it defaults to ``None``
+    data (*variable*): Content of the reparse type
+'''
+
+_reparse_namespace = {"__len__" : _len_reparse,
+                    "create_from_binary" : classmethod(_from_binary_reparse)
+                 }
+
+ReparsePoint = _create_attrcontent_class("ReparsePoint",
+            ("reparse_type", "reparse_flags", "data_len", "guid", "data"),
+        inheritance=(AttributeContentRepr,), data_structure="<IH2x",
+        extra_functions=_reparse_namespace, docstring=_docstring_reparse)
 
 #******************************************************************************
 # EA_INFORMATION ATTRIBUTE
