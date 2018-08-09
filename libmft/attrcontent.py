@@ -794,7 +794,7 @@ def _from_binary_idx_nh(cls, binary_stream):
     '''
     nw_obj = cls(cls._REPR.unpack(binary_stream[:cls._REPR.size]))
 
-    _MOD_LOGGER.debug("Attempted to unpack VOLUME_INFORMATION Entry from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
+    _MOD_LOGGER.debug("Attempted to unpack Index Node Header Entry from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
 
     return nw_obj
 
@@ -864,7 +864,7 @@ def _from_binary_idx_e(cls, binary_stream, content_type=None):
 
     nw_obj = cls((generic, entry_len, cont_len, IndexEntryFlags(flags), binary_content, vcn_child_node))
 
-    _MOD_LOGGER.debug("Attempted to unpack VOLUME_INFORMATION Entry from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
+    _MOD_LOGGER.debug("Attempted to unpack Index Entry from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
 
     return nw_obj
 
@@ -912,7 +912,7 @@ IndexEntry = _create_attrcontent_class("IndexEntry",
 #------------------------------------------------------------------------------
 
 
-def _from_binary__idx_root(cls, binary_stream):
+def _from_binary_idx_root(cls, binary_stream):
     """See base class."""
     ''' Attribute type - 4
         Collation rule - 4
@@ -938,7 +938,7 @@ def _from_binary__idx_root(cls, binary_stream):
     nw_obj = cls((attr_type, CollationRule(collation_rule), b_per_idx_r,
                     c_per_idx_r, node_header, index_entry_list ))
 
-    _MOD_LOGGER.debug("Attempted to unpack VOLUME_INFORMATION Entry from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
+    _MOD_LOGGER.debug("Attempted to unpack INDEX_ROOT Entry from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
 
     return nw_obj
 
@@ -974,7 +974,7 @@ Attributes:
 '''
 
 _idx_root_namespace = {"__len__" : _len_idx_root,
-                    "create_from_binary" : classmethod(_from_binary__idx_root)
+                    "create_from_binary" : classmethod(_from_binary_idx_root)
                  }
 
 IndexRoot = _create_attrcontent_class("IndexRoot",
@@ -1074,6 +1074,8 @@ def _from_binary_junc_mnt(cls, binary_view):
     offset = cls._REPR.size + offset_print_name
     print_name = binary_view[offset:offset+len_print_name].tobytes().decode("utf_16_le")
 
+    _MOD_LOGGER.debug("Attempted to unpack Junction or MNT point from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
+
     return cls((target_name, print_name))
 
 def _len_junc_mnt(self):
@@ -1119,6 +1121,8 @@ def _from_binary_syn_link(cls, binary_view):
     target_name = binary_view[offset:len_target_name].tobytes().decode("utf_16_le")
     offset = cls._REPR.size + offset_print_name
     print_name = binary_view[offset:offset+len_print_name].tobytes().decode("utf_16_le")
+
+    _MOD_LOGGER.debug("Attempted to unpack Symbolic Link from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
 
     return cls((target_name, print_name, SymbolicLinkFlags(syn_flags)))
 
@@ -1178,6 +1182,8 @@ def _from_binary_reparse(cls, binary_view):
         guid = UUID(bytes_le=binary_view[cls._REPR.size:cls._REPR.size+16].tobytes())
         data = binary_view[cls._REPR.size+16:].tobytes()
 
+    _MOD_LOGGER.debug("Attempted to unpack REPARSE_POINT from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
+
     nw_obj = cls((reparse_type, reparse_flags, data_len, guid, data))
 
     return nw_obj
@@ -1233,217 +1239,170 @@ ReparsePoint = _create_attrcontent_class("ReparsePoint",
 #******************************************************************************
 # EA_INFORMATION ATTRIBUTE
 #******************************************************************************
-class EaInformation(AttributeContentRepr):
-    '''Represents the content of a EA_INFORMATION attribute.
 
-    The (HPFS) extended attribute information ($EA_INFORMATION) contains
-    information about the extended attribute ($EA).
-
-    Note:
-        This class receives an Iterable as argument, the "Parameters/Args" section
-        represents what must be inside the Iterable. The Iterable MUST preserve
-        order or things might go boom.
-
-    Args:
-        content[0] (int): Size of the EA attribute entry
-        content[1] (int): Number of EA attributes with NEED_EA set
-        content[2] (int): Size of the EA data
-
-    Attributes:
-        entry_len (int): Size of the EA attribute entry
-        ea_set_number (int): Number of EA attributes with NEED_EA set
-        ea_size (int): Size of the EA data
-    '''
-
-    _REPR = struct.Struct("<2HI")
+def _from_binary_ea_info(cls, binary_stream):
+    """See base class."""
     ''' Size of Extended Attribute entry - 2
         Number of Extended Attributes which have NEED_EA set - 2
         Size of extended attribute data - 4
     '''
+    return cls(cls._REPR.unpack(binary_stream[:cls._REPR.size]))
 
-    def __init__(self, content=(None,)*3):
-        """Check class docstring"""
-        self.entry_len, self.ea_set_number, self.ea_size = content
+def _len_ea_info(self):
+    return EaInformation._REPR.size
 
-    @classmethod
-    def get_representation_size(cls):
-        """See base class."""
-        return cls._REPR.size
+_docstring_ea_info = '''Represents the content of a EA_INFORMATION attribute.
 
-    @classmethod
-    def create_from_binary(cls, binary_stream):
-        """See base class."""
-        return cls(cls._REPR.unpack(binary_stream[:cls._REPR.size]))
+The (HPFS) extended attribute information ($EA_INFORMATION) contains
+information about the extended attribute ($EA).
 
-    def __len__(self):
-        return EaInformation._REPR.size
+Note:
+    This class receives an Iterable as argument, the "Parameters/Args" section
+    represents what must be inside the Iterable. The Iterable MUST preserve
+    order or things might go boom.
 
-    def __eq__(self, other):
-        if isinstance(other, EaInformation):
-            return self.entry_len == other.entry_len and self.ea_set_number == other.ea_set_number \
-                and self.ea_size == other.ea_size
-        return False
+Args:
+    content[0] (int): Size of the EA attribute entry
+    content[1] (int): Number of EA attributes with NEED_EA set
+    content[2] (int): Size of the EA data
 
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return f'{self.__class__.__name__}(entry_len={self.entry_len}, ea_set_number={self.ea_set_number}, ea_size={self.ea_size})'
+Attributes:
+    entry_len (int): Size of the EA attribute entry
+    ea_set_number (int): Number of EA attributes with NEED_EA set
+    ea_size (int): Size of the EA data
+'''
+
+_ea_info_namespace = {"__len__" : _len_ea_info,
+                    "create_from_binary" : classmethod(_from_binary_ea_info)
+                 }
+
+EaInformation = _create_attrcontent_class("EaInformation",
+            ("entry_len", "ea_set_number", "ea_size"),
+        inheritance=(AttributeContentRepr,), data_structure="<2HI",
+        extra_functions=_ea_info_namespace, docstring=_docstring_ea_info)
 
 #******************************************************************************
 # EA ATTRIBUTE
 #******************************************************************************
-class EaEntry(AttributeContentRepr):
-    '''Represents an entry for EA.
 
-    The EA attribute is composed by multiple EaEntries. Some information is not
-    completely understood for this. One of those is if it is necessary some
-    kind of aligment from the name to the value. The code considers a 8 byte
-    aligment and calculates that automatically.
-
-    Warning:
-        The interpretation of the binary data MAY be wrong. The community does
-        not have all the data.
-
-    Note:
-        This class receives an Iterable as argument, the "Parameters/Args" section
-        represents what must be inside the Iterable. The Iterable MUST preserve
-        order or things might go boom.
-
-    Args:
-        content[0] (int): Offset to the next EA
-        content[1] (:obj:`EAFlags`): Changed timestamp
-        content[2] (str): Name of the EA attribute
-        content[3] (bytes): Value of the attribute
-
-    Attributes:
-        offset_next_ea (int): Offset to next extended attribute entry.
-            The offset is relative from the start of the extended attribute data.
-        flags (:obj:`EAFlags`): Changed timestamp
-        name (str): Name of the EA attribute
-        value (bytes): Value of the attribute
-    '''
-
-    _REPR = struct.Struct("<I2BH")
+def _from_binary_ea_entry(cls, binary_stream):
+    """See base class."""
     ''' Offset to the next EA  - 4
         Flags - 1
         Name length - 1
         Value length - 2
     '''
+    offset_next_ea, flags, name_len, value_len = cls._REPR.unpack(binary_stream[:cls._REPR.size])
 
-    def __init__(self, content=(None,)*4):
-        """Check class docstring"""
-        self.offset_next_ea, self.flags, self.name, self.value = content
+    name = binary_stream[cls._REPR.size:cls._REPR.size + name_len].tobytes().decode("ascii")
+    #it looks like the value is 8 byte aligned, do some math to compensate
+    #TODO confirm if this is true
+    value_alignment = (_ceil((cls._REPR.size + name_len) / 8) * 8)
+    value = binary_stream[value_alignment:value_alignment + value_len].tobytes()
 
-    def _get_name_len(self):
-        """int: Returns the length of the name"""
-        return len(self.name)
+    nw_obj = cls((offset_next_ea, EAFlags(flags), name, value))
 
-    def _get_value_len(self):
-        """int: Returns the length of the value"""
-        return len(self.value)
+    _MOD_LOGGER.debug("Attempted to unpack EA entry from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
 
-    #the name length can derived from the name, so, we don't need to keep in memory
-    name_len = property(_get_name_len, doc='Length of the name')
-    value_len = property(_get_value_len, doc='Length of the value')
+    return nw_obj
 
-    @classmethod
-    def get_representation_size(cls):
-        """See base class."""
-        return cls._REPR.size
+def _len_ea_entry(self):
+    '''Returns the size of the entry'''
+    return EaEntry._REPR.size + len(self.name.encode("ascii")) + self.value_len
 
-    @classmethod
-    def create_from_binary(cls, binary_stream):
-        """See base class."""
-        content = cls._REPR.unpack(binary_stream[:cls._REPR.size])
-        nw_obj = cls()
+_docstring_ea_entry = '''Represents an entry for EA.
 
-        #_MOD_LOGGER.debug(f"Creating EaEntry from binary '{binary_stream.tobytes()}'...")
-        _MOD_LOGGER.debug("Creating EaEntry from binary '%s'...", binary_stream.tobytes())
-        name = binary_stream[cls._REPR.size:cls._REPR.size + content[2]].tobytes().decode("ascii")
-        #it looks like the value is 8 byte aligned, do some math to compensate
-        #TODO confirm if this is true
-        value_alignment = (_ceil((cls._REPR.size + content[2]) / 8) * 8)
-        value = binary_stream[value_alignment:value_alignment + content[3]].tobytes()
+The EA attribute is composed by multiple EaEntries. Some information is not
+completely understood for this. One of those is if it is necessary some
+kind of aligment from the name to the value. The code considers a 8 byte
+aligment and calculates that automatically.
 
-        nw_obj.offset_next_ea, nw_obj.flags, nw_obj.name, nw_obj.value = \
-            content[0], EAFlags(content[1]), name, value
+Warning:
+    The interpretation of the binary data MAY be wrong. The community does
+    not have all the data.
 
-        #_MOD_LOGGER.debug(f"New EaEntry {repr(nw_obj)}")
-        _MOD_LOGGER.debug("New EaEntry %r", nw_obj)
+Note:
+    This class receives an Iterable as argument, the "Parameters/Args" section
+    represents what must be inside the Iterable. The Iterable MUST preserve
+    order or things might go boom.
 
-        return nw_obj
+Args:
+    content[0] (int): Offset to the next EA
+    content[1] (:obj:`EAFlags`): Changed timestamp
+    content[2] (str): Name of the EA attribute
+    content[3] (bytes): Value of the attribute
 
-    def __len__(self):
-        '''Returns the size of the entry'''
-        return EaEntry._REPR.size + len(self.name.encode("ascii")) + self.value_len
+Attributes:
+    offset_next_ea (int): Offset to next extended attribute entry.
+        The offset is relative from the start of the extended attribute data.
+    flags (:obj:`EAFlags`): Changed timestamp
+    name (str): Name of the EA attribute
+    value (bytes): Value of the attribute
+'''
 
-    def __eq__(self, other):
-        if isinstance(other, EaEntry):
-            return self.offset_next_ea == other.offset_next_ea and self.flags == other.flags \
-                and self.name == other.name and self.value == other.value
-        return False
+_ea_entry_namespace = {"__len__" : _len_ea_entry,
+                    "create_from_binary" : classmethod(_from_binary_ea_entry)
+                 }
 
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return f'{self.__class__.__name__}(offset_next_ea={self.offset_next_ea}, flags={str(self.flags)}, name={self.name}, value={self.value}, name_len={self.name_len}, value_len={self.value_len})'
+EaEntry = _create_attrcontent_class("EaEntry",
+            ("offset_next_ea", "flags", "name", "value"),
+        inheritance=(AttributeContentRepr,), data_structure="<I2BH",
+        extra_functions=_ea_entry_namespace, docstring=_docstring_ea_entry)
 
-class Ea(AttributeContentNoRepr):
-    '''Represents the content of a EA attribute.
+#------------------------------------------------------------------------------
 
-    Is a list of EaEntry. It behaves as list in python, you can iterate
-    over it, access by member, etc.
+def _from_binary_ea(cls, binary_stream):
+    """See base class."""
+    _ea_list = []
+    offset = 0
 
-    Important:
-        Using the ``len()`` method on the objects of this class returns the number
-        of elements in the list.
+    #_MOD_LOGGER.debug(f"Creating Ea object from binary stream {binary_stream.tobytes()}...")
+    _MOD_LOGGER.debug("Creating Ea object from binary '%s'...", binary_stream.tobytes())
+    while True:
+        entry = EaEntry.create_from_binary(binary_stream[offset:])
+        offset += entry.offset_next_ea
+        _ea_list.append(entry)
+        if offset >= len(binary_stream):
+            break
+    nw_obj = cls(_ea_list)
 
-    Args:
-        content (list(:obj:`EaEntry`)): List of AttributeListEntry
-    '''
+    _MOD_LOGGER.debug("Attempted to unpack EA from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
 
-    def __init__(self, content):
-        """Check class docstring"""
-        self._ea_list = content
+    return nw_obj
 
-    @classmethod
-    def create_from_binary(cls, binary_stream):
-        """See base class."""
-        _ea_list = []
-        offset = 0
+def _len_ea(self):
+    '''Return the number of entries in the attribute list'''
+    return len(self._attr_list)
 
-        #_MOD_LOGGER.debug(f"Creating Ea object from binary stream {binary_stream.tobytes()}...")
-        _MOD_LOGGER.debug("Creating Ea object from binary '%s'...", binary_stream.tobytes())
-        while True:
-            entry = EaEntry.create_from_binary(binary_stream[offset:])
-            offset += entry.offset_next_ea
-            _ea_list.append(entry)
-            if offset >= len(binary_stream):
-                break
-            _MOD_LOGGER.debug("Next EaEntry offset = %d", offset)
-        _MOD_LOGGER.debug("Ea object created successfully.")
+def _iter_ea(self):
+    return iter(self._attr_list)
 
-        return cls(_ea_list)
+def _gitem_ea(self, index):
+    return _getitem(self._attr_list, index)
 
-    def __iter__(self):
-        '''Return the iterator for the representation of the list, so it is
-        easier to check everything'''
-        return iter(self._ea_list)
+_docstring_ea = '''Represents the content of a EA attribute.
 
-    def __getitem__(self, index):
-        '''Return the AttributeListEntry at the specified position'''
-        return _getitem(self._ea_list, index)
+Is a list of EaEntry. It behaves as list in python, you can iterate
+over it, access by member, etc.
 
-    def __len__(self):
-        '''Returns the logical size of the file'''
-        return len(self._ea_list)
+Important:
+    Using the ``len()`` method on the objects of this class returns the number
+    of elements in the list.
 
-    def __eq__(self, other):
-        if isinstance(other, Ea):
-            return self._ea_list == other._ea_list
-        return False
+Args:
+    content (list(:obj:`EaEntry`)): List of AttributeListEntry
+'''
 
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return self.__class__.__name__ + f"(_ea_list={self._ea_list})"
+_ea_namespace = {"__len__" : _len_ea,
+                       "__iter__" : _iter_ea,
+                       "__getitem__" : _gitem_ea,
+                       "create_from_binary" : classmethod(_from_binary_ea)
+                 }
+
+Ea = _create_attrcontent_class("Ea",
+            ("_ea_list",),
+        inheritance=(AttributeContentNoRepr,), data_structure=None,
+        extra_functions=_ea_namespace, docstring=_docstring_ea)
 
 #******************************************************************************
 # SECURITY_DESCRIPTOR ATTRIBUTE
