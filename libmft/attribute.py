@@ -1,105 +1,82 @@
 # -*- coding: utf-8 -*-
 '''
-Contains all contents for the attributes.
+Contains the necessary information to create an attributes for the MFT.
 
-The code here expects, as we have only the $MFT available for processing,
-contigous binary strings.
+An MFT entry is composed of multiple attributes. Each attribute, is composed
+by a header and a content. Also a attribute can be resident, when the content
+is in the MFT itself or non-resident if the content is outside. If we are not
+considering the content, the only difference is the information present in the
+header.
 
-Calling the constructors for a non-resident attribute MAY lead to an unxpected
-behaviour.
+As such, we have a basic attribute header (``BaseAttributeHeader``) that holds
+the common attributes for the headers and specific classes that represent
+the different headers.
+
+For the content, each content has a very specific mode of be interpreted.
+The implementations can also be found in this modules. One major difference
+for content to the headers is that the class creation for content is
+dynamic, that means that expected methods are created when the module is
+imported.
 
 Note:
-    This module is heavily dependent on the ``memoryview`` structure, as it
-    allows for slice and dicing without new copies.
+    All creation code from binary stream expects a `memoryview` object. This is
+    for performance reasons, as this don't generate new objects when we slice
+    the data.
 
 Important:
     The implementation of __len__ in the classes here is meant to return the
-    size in bytes, unless otherwise mentioned.
+    size in BYTES, unless otherwise mentioned.
 
 .. moduleauthor:: Júlio Dantas <jldantas@gmail.com>
 '''
 import struct
 import logging
-from itertools import chain as _chain
 from operator import getitem as _getitem
 from uuid import UUID
 from abc import ABCMeta, abstractmethod
 from math import ceil as _ceil
 import sys as _sys
-import types
 
 from libmft.util.functions import convert_filetime, get_file_reference
-from libmft.flagsandtypes import AttrTypes, NameType, FileInfoFlags, \
+from libmft.flagsandtypes import AttrTypes, AttrFlags, NameType, FileInfoFlags, \
     IndexEntryFlags, VolumeFlags, ReparseType, ReparseFlags, CollationRule, \
     SecurityDescriptorFlags, ACEType, ACEControlFlags, ACEAccessFlags, \
     SymbolicLinkFlags, EAFlags
-from libmft.exceptions import ContentError
+from libmft.exceptions import HeaderError, ContentError
+
+#******************************************************************************
+# MODULE LEVEL VARIABLES
+#******************************************************************************
 
 _MOD_LOGGER = logging.getLogger(__name__)
 '''logging.Logger: Module level logger for all the logging needs of the module'''
+_ATTR_BASIC = struct.Struct("<2IB")
+'''struct.Struct: Struct to get basic information from the attribute header'''
 
 #******************************************************************************
-# ABSTRACT CLASS FOR ATTRIBUTE CONTENT
+# MODULE LEVEL FUNCTIONS
 #******************************************************************************
-class AttributeContentBase(metaclass=ABCMeta):
-    '''Base class for attribute's content.
+def get_attr_info(binary_view):
+    '''Gets basic information from a binary stream to allow correct processing of
+    the attribute header.
 
-    This class is an interface to all the attribute's contents. It can't be
-    instantiated and serves only a general interface.
+    This function allows the interpretation of the Attribute type, attribute length
+    and if the attribute is non resident.
+
+    Args:
+        binary_view (memoryview of bytearray) - A binary stream with the
+            information of the attribute
+
+    Returns:
+        An tuple with the attribute type, the attribute length, in bytes, and
+        if the attribute is resident or not.
     '''
+    global _ATTR_BASIC
 
-    @classmethod
-    @abstractmethod
-    def create_from_binary(cls, binary_stream):
-        '''Creates an object from from a binary stream.
+    attr_type, attr_len, non_resident = _ATTR_BASIC.unpack(binary_view[:9])
 
-        Args:
-            binary_stream (memoryview): A buffer access to the underlying binary
-                stream
+    return (AttrTypes(attr_type), attr_len, bool(non_resident))
 
-        Returns:
-            A new object of whatever type has overloaded the method.
-        '''
-        pass
-
-    @abstractmethod
-    def __len__(self):
-        '''Get the actual size of the content, in bytes, as some attributes have variable sizes.'''
-        pass
-
-    @abstractmethod
-    def __eq__(self, other):
-        pass
-
-class AttributeContentNoRepr(AttributeContentBase):
-    '''Base class for attribute's content that don't have a fixed representation.
-
-    This class is an interface to the attribute's contents. It can't be
-    instantiated and serves only a general interface.
-    '''
-    pass
-
-class AttributeContentRepr(AttributeContentBase):
-    '''Base class for attribute's content that don't have a fixed representation.
-
-    This class is an interface to the attribute's contents. It can't be
-    instantiated and serves only a general interface.
-    '''
-
-    @classmethod
-    @abstractmethod
-    def get_representation_size(cls):
-        '''Get the representation size, in bytes, based on defined struct
-
-        Returns:
-            An ``int`` with the size of the structure
-        '''
-        pass
-
-#******************************************************************************
-# Class factory helper
-#******************************************************************************
-#TODO move this to some other place?
 def _create_attrcontent_class(name, fields, inheritance=(object,), data_structure=None, extra_functions=None, docstring=""):
     '''Helper function that creates a class for attribute contents.
 
@@ -231,6 +208,439 @@ def _create_attrcontent_class(name, fields, inheritance=(object,), data_structur
         pass
 
     return new_class
+
+#******************************************************************************
+# CLASSES
+#******************************************************************************
+
+#******************************************************************************
+# DATA_RUN
+#******************************************************************************
+# Data runs are part of the non resident header.
+class DataRuns():
+    '''Represents the data runs of a non-resident attribute.
+
+    When we have non resident attributes, it is necessary to map where in the
+    disk the contents are. For that the NTFS uses data runs.
+
+    Great resource for explanation and tests:
+    https://flatcap.org/linux-ntfs/ntfs/concepts/data_runs.html
+
+    Important:
+        Calling ``len`` in this class returns the number of data runs, not the
+        size in bytes.
+
+    Args:
+        data_runs (list of tuples) - A list of tuples representing the data run.
+            The tuple has to have 2 elements, where the first element is the
+            length of the data run and the second is the absolute offset
+
+    Attributes:
+        data_runs (list of tuples) - A list of tuples representing the data run.
+            The tuple has to have 2 elements, where the first element is the
+            length of the data run and the second is the absolute offset
+    '''
+    _INFO = struct.Struct("<B")
+
+    def __init__(self, data_runs=[]):
+        '''See class docstring.'''
+        self.data_runs = data_runs #list of tuples
+
+    @classmethod
+    def create_from_binary(cls, binary_view):
+        '''Creates a new object DataRuns from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray.
+
+        Args:
+            binary_view (memoryview of bytearray) - A binary stream with the
+                information of the attribute
+
+        Returns:
+            DataRuns: New object using hte binary stream as source
+        '''
+        nw_obj = cls()
+        offset = 0
+        previous_dr_offset = 0
+        header_size = cls._INFO.size #"header" of a data run is always a byte
+
+        while binary_view[offset] != 0:   #the runlist ends with an 0 as the "header"
+            header = cls._INFO.unpack(binary_view[offset:offset+header_size])[0]
+            length_len = header & 0x0F
+            length_offset = (header & 0xF0) >> 4
+
+            temp_len = offset+header_size+length_len #helper variable just to make things simpler
+            dr_length = int.from_bytes(binary_view[offset+header_size:temp_len], "little", signed=False)
+            if length_offset: #the offset is relative to the previous data run
+                dr_offset = int.from_bytes(binary_view[temp_len:temp_len+length_offset], "little", signed=True) + previous_dr_offset
+                previous_dr_offset = dr_offset
+            else: #if it is sparse, requires a a different approach
+                dr_offset = None
+            offset += header_size + length_len + length_offset
+            nw_obj.data_runs.append((dr_length, dr_offset))
+
+        _MOD_LOGGER.debug("DataRuns object created successfully")
+
+        return nw_obj
+
+    def __len__(self):
+        '''Returns the number of data runs'''
+        return len(self.data_runs)
+
+    def __iter__(self):
+        '''Return the iterator for the representation of the list.'''
+        return iter(self.data_runs)
+
+    def __getitem__(self, index):
+        '''Return a specific data run'''
+        return _getitem(self.data_runs, index)
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return f'{self.__class__.__name__}(data_runs={self.data_runs})'
+
+class BaseAttributeHeader():
+    '''Represents the common contents of the Attribute Header.
+
+    Independently if the attribute is resident on non-resident, all of them
+    have a common set a data. This class represents this common set of attributes
+    and is not meant to be used directly, but to be inherited by the resident
+    header and non resident header classes.
+
+    Note:
+        This class receives an Iterable as argument, the "Parameters/Args" section
+        represents what must be inside the Iterable. The Iterable MUST preserve
+        order or things might go boom.
+
+    Args:
+        content[0] (:obj:`AttrTypes`): Type of the attribute
+        content[1] (int): Attribute's length, in bytes
+        content[2] (bool): True if non resident attribute, False otherwise
+        content[3] (:obj:`AttrFlags`): Attribute flags
+        content[4] (int): Attribute ID
+        content[5] (str): Attribute name
+
+    Attributes:
+        attr_type_id (:obj:`AttrTypes`): Type of the attribute
+        attr_len (int): Attribute's length, in bytes
+        non_resident (bool): True if non resident attribute, False otherwise
+        flags (:obj:`AttrFlags`): Attribute flags
+        attr_id (int): Attribute ID
+        attr_name (str): Attribute name
+    '''
+    _REPR_STRING = "2I2B3H"
+
+    _REPR = struct.Struct("<2I2B3H")
+    ''' Attribute type id - 4 (AttrTypes)
+        Length of the attribute - 4 (in bytes)
+        Non-resident flag - 1 (0 - resident, 1 - non-resident)
+        Length of the name - 1 (in number of characters)
+        Offset to name - 2
+        Flags - 2 (AttrFlags)
+        Attribute id - 2
+    '''
+
+    __slots__ = ("attr_type_id", "attr_len", "non_resident", "flags", "attr_id",
+        "attr_name")
+
+    def __init__(self, content=(None,)*6):
+        '''See class docstring.'''
+        self.attr_type_id, self.attr_len, self.non_resident, self.flags, self.attr_id, \
+        self.attr_name = content
+
+
+    @classmethod
+    def create_from_binary(cls, binary_view):
+        '''Creates a new object BaseAttributeHeader from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray.
+
+        Args:
+            binary_view (memoryview of bytearray) - A binary stream with the
+                information of the attribute
+
+        Returns:
+            BaseAttributeHeader: New object using hte binary stream as source
+        '''
+        attr_type, attr_len, non_resident, name_len, name_offset, flags, attr_id = cls._REPR.unpack(binary_view[:cls._REPR.size])
+
+        if name_len:
+            name = binary_view[name_offset:name_offset+(2*name_len)].tobytes().decode("utf_16_le")
+        else:
+            name = None
+
+        nw_obj = cls((AttrTypes(attr_type), attr_len, bool(non_resident), AttrFlags(flags), attr_id, name ))
+
+        return nw_obj
+
+    @classmethod
+    def get_representation_size(cls):
+        '''Return the header size WITHOUT accounting for a possible named attribute.'''
+        return cls._REPR.size
+
+    def __len__(self):
+        '''Returns the logical size of the attribute'''
+        return self.attr_len
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return (f'{self.__class__.__name__}(attr_type_id={str(self.attr_type_id)},'
+                f'attr_len={self.attr_len}, nonresident_flag={self.non_resident},'
+                f'flags={str(self.flags)}, attr_id={self.attr_id},'
+                f'resident_header={self.resident_header}, non_resident_header={self.non_resident_header}, attr_name={self.attr_name})'
+               )
+
+class ResidentAttrHeader(BaseAttributeHeader):
+    '''Represents the the attribute header when the attribute is resident.
+
+    Note:
+        This class receives an Iterable as argument, the "Parameters/Args" section
+        represents what must be inside the Iterable. The Iterable MUST preserve
+        order or things might go boom.
+
+    Args:
+        content_basic (Iterable): See BaseAttributeHeader documentation
+        content_specific[0] (int): Content's length, in bytes
+        content_specific[1] (int): Content offset
+        content_specific[2] (int): Indexed flag
+
+    Attributes:
+        content_len (int): Content's length, in bytes
+        content_offset (int): Content offset
+        indexed_flag (int): Indexed flag
+    '''
+
+    _REPR = struct.Struct("".join(["<", BaseAttributeHeader._REPR_STRING, "IHBx"]))
+    '''
+    BASIC HEADER
+        Attribute type id - 4 (AttrTypes)
+        Length of the attribute - 4 (in bytes)
+        Non-resident flag - 1 (0 - resident, 1 - non-resident)
+        Length of the name - 1 (in number of characters)
+        Offset to name - 2
+        Flags - 2 (AttrFlags)
+        Attribute id - 2
+    RESIDENT HEADER COMPLEMENT
+        Content length - 4
+        Content offset - 2
+        Indexed flag - 1
+        Padding - 1
+    '''
+
+    __slots__ = ("content_len", "content_offset", "indexed_flag")
+
+    def __init__(self, content_basic=(None,)*6, content_specific=(None,)*3):
+        super().__init__(content_basic)
+        self.content_len, self.content_offset, self.indexed_flag = content_specific
+        pass
+
+    @classmethod
+    def get_representation_size(cls):
+        '''Return the header size WITHOUT accounting for a possible named attribute.'''
+        return cls._REPR.size
+
+    @classmethod
+    def create_from_binary(cls, binary_view):
+        '''Creates a new object AttributeHeader from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray.
+
+        Args:
+            binary_view (memoryview of bytearray) - A binary stream with the
+                information of the attribute
+
+        Returns:
+            AttributeHeader: New object using hte binary stream as source
+        '''
+        attr_type, attr_len, non_resident, name_len, name_offset, flags, attr_id, \
+        content_len, content_offset, indexed_flag = cls._REPR.unpack(binary_view[:cls._REPR.size])
+
+        if name_len:
+            name = binary_view[name_offset:name_offset+(2*name_len)].tobytes().decode("utf_16_le")
+        else:
+            name = None
+
+        nw_obj = cls((AttrTypes(attr_type), attr_len, bool(non_resident), AttrFlags(flags), attr_id, name),
+                        (content_len, content_offset, indexed_flag))
+
+        return nw_obj
+
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return (f'{self.__class__.__name__}(attr_type_id={str(self.attr_type_id)},'
+                f'attr_len={self.attr_len}, nonresident_flag={self.non_resident},'
+                f'flags={str(self.flags)}, attr_id={self.attr_id}, attr_name={self.attr_name}'
+                f'content_len={self.content_len}, content_offset={self.content_offset}),indexed_flag={self.indexed_flag}'
+                )
+
+class NonResidentAttrHeader(BaseAttributeHeader):
+    '''Represents the non-resident header of an attribute.'''
+
+    _REPR = struct.Struct("".join(["<", BaseAttributeHeader._REPR_STRING, "2Q2H4x3Q"]))
+    '''
+    BASIC HEADER
+        Attribute type id - 4 (AttrTypes)
+        Length of the attribute - 4 (in bytes)
+        Non-resident flag - 1 (0 - resident, 1 - non-resident)
+        Length of the name - 1 (in number of characters)
+        Offset to name - 2
+        Flags - 2 (AttrFlags)
+        Attribute id - 2
+    NON-RESIDENT HEADER COMPLEMENT
+        Start virtual cluster number - 8
+        End virtual cluster number - 8
+        Runlist offset - 2
+        Compression unit size - 2
+        Padding - 4
+        Allocated size of the stream - 8
+        Current size of the stream - 8
+        Initialized size of the stream - 8
+        Data runs - dynamic
+    '''
+
+    __slots__ = ("start_vcn", "end_vcn", "rl_offset", "compress_usize", "alloc_sstream", "curr_sstream", "init_sstream", "data_runs")
+
+    def __init__(self, content_basic=(None,)*6, content_specific=(None,)*7, data_runs=None):
+        '''Creates a NonResidentAttrHeader object. The content has to be an iterable
+        with precisely 9 elements in order.
+        If content is not provided, a 9 element tuple, where all elements are
+        None, is the default argument
+
+        Args:
+            content (iterable), where:
+                [0] (int) - start vcn
+                [1] (int) - end vcn
+                [2] (int) - datarun list offset
+                [3] (int) - compression unit size
+                [4] (int) - allocated data size
+                [5] (int) - current data size
+                [6] (int) - initialized data size
+            data_runs (list of DataRuns) - A list with all dataruns relative
+                to this particular header. If nothing is provided, the default
+                argument is 'None'.
+        '''
+        super().__init__(content_basic)
+        self.start_vcn, self.end_vcn, self.rl_offset, self.compress_usize, \
+        self.alloc_sstream, self.curr_sstream, self.init_sstream = content_specific
+        self.data_runs = data_runs
+
+    @classmethod
+    def get_representation_size(cls):
+        '''Return the header size, does not account for the number of data runs'''
+        return cls._REPR.size
+
+    @classmethod
+    def create_from_binary(cls, load_dataruns, binary_view):
+        '''Creates a new object NonResidentAttrHeader from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray.
+
+        Args:
+            load_dataruns (bool) - Indicates if the dataruns are to be loaded
+            binary_view (memoryview of bytearray) - A binary stream with the
+                information of the attribute
+            non_resident_offset (int) - The offset where the non resident header
+                begins
+
+        Returns:
+            NonResidentAttrHeader: New object using hte binary stream as source
+        '''
+        attr_type, attr_len, non_resident, name_len, name_offset, flags, attr_id, \
+            start_vcn, end_vcn, rl_offset, compress_usize, alloc_sstream, curr_sstream, \
+            init_sstream = cls._REPR.unpack(binary_view[:cls._REPR.size])
+
+        if name_len:
+            name = binary_view[name_offset:name_offset+(2*name_len)].tobytes().decode("utf_16_le")
+        else:
+            name = None
+
+        #content = cls._REPR.unpack(binary_view[non_resident_offset:non_resident_offset+cls._REPR.size])
+        nw_obj = cls((AttrTypes(attr_type), attr_len, bool(non_resident), AttrFlags(flags), attr_id, name),
+            (start_vcn, end_vcn, rl_offset, compress_usize, alloc_sstream, curr_sstream, init_sstream))
+
+        if load_dataruns:
+            nw_obj.data_runs = DataRuns.create_from_binary(binary_view[nw_obj.rl_offset:])
+        _MOD_LOGGER.debug("NonResidentAttrHeader object created successfully")
+
+        return nw_obj
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return (f'{self.__class__.__name__}(attr_type_id={str(self.attr_type_id)},'
+                f'attr_len={self.attr_len}, nonresident_flag={self.non_resident},'
+                f'flags={str(self.flags)}, attr_id={self.attr_id}, attr_name={self.attr_name},'
+                f'start_vcn={self.start_vcn}, end_vcn={self.end_vcn}, rl_offset={self.rl_offset},'
+                f'compress_usize={self.compress_usize}, alloc_sstream={self.alloc_sstream},'
+                f'curr_sstream={self.curr_sstream}, init_sstream={self.init_sstream}, data_runs={self.data_runs})'
+                )
+
+#------------------------------------------------------------------------------
+#******************************************************************************
+#******************************************************************************
+# ATTRIBUTE CONTENT CLASSES
+#******************************************************************************
+#******************************************************************************
+#------------------------------------------------------------------------------
+
+#******************************************************************************
+# ABSTRACT CLASS FOR ATTRIBUTE CONTENT
+#******************************************************************************
+class AttributeContentBase(metaclass=ABCMeta):
+    '''Base class for attribute's content.
+
+    This class is an interface to all the attribute's contents. It can't be
+    instantiated and serves only a general interface.
+    '''
+
+    @classmethod
+    @abstractmethod
+    def create_from_binary(cls, binary_stream):
+        '''Creates an object from from a binary stream.
+
+        Args:
+            binary_stream (memoryview): A buffer access to the underlying binary
+                stream
+
+        Returns:
+            A new object of whatever type has overloaded the method.
+        '''
+        pass
+
+    @abstractmethod
+    def __len__(self):
+        '''Get the actual size of the content, in bytes, as some attributes have variable sizes.'''
+        pass
+
+    @abstractmethod
+    def __eq__(self, other):
+        pass
+
+class AttributeContentNoRepr(AttributeContentBase):
+    '''Base class for attribute's content that don't have a fixed representation.
+
+    This class is an interface to the attribute's contents. It can't be
+    instantiated and serves only a general interface.
+    '''
+    pass
+
+class AttributeContentRepr(AttributeContentBase):
+    '''Base class for attribute's content that don't have a fixed representation.
+
+    This class is an interface to the attribute's contents. It can't be
+    instantiated and serves only a general interface.
+    '''
+
+    @classmethod
+    @abstractmethod
+    def get_representation_size(cls):
+        '''Get the representation size, in bytes, based on defined struct
+
+        Returns:
+            An ``int`` with the size of the structure
+        '''
+        pass
+
 
 #******************************************************************************
 # TIMESTAMPS class

@@ -75,14 +75,129 @@ from operator import itemgetter as _itemgetter
 from libmft.util.functions import convert_filetime, apply_fixup_array, flatten, \
     get_file_size as _get_file_size, get_file_reference
 from libmft.flagsandtypes import MftSignature, AttrTypes, MftUsageFlags
-from libmft.attrcontent import StandardInformation, FileName, IndexRoot, Data, \
+from libmft.attribute import StandardInformation, FileName, IndexRoot, Data, \
     AttributeList, Bitmap, ObjectID, VolumeName, VolumeInformation, ReparsePoint, \
     EaInformation, LoggedToolStream, SecurityDescriptor, Ea
-from libmft.headers import MFTHeader, ResidentAttrHeader, NonResidentAttrHeader,  \
-    AttributeHeader, DataRuns
+from libmft.attribute import ResidentAttrHeader, NonResidentAttrHeader, get_attr_info as _get_attr_info
 from libmft.exceptions import FixUpError, DataStreamError, EntryError, MFTError, HeaderError
 
 _MOD_LOGGER = logging.getLogger(__name__)
+
+class MFTHeader():
+    '''Represent the MFT header present in all MFT entries.'''
+    #TODO create a way of dealing with XP only artefacts
+    _REPR = struct.Struct("<4s2HQ4H2IQH2xI")
+    ''' Signature - 4 = FILE or BAAD
+        Fix Up Array offset - 2
+        Fix Up Count - 2
+        Log file sequence # (LSN) - 8
+        Sequence number - 2
+        Hard Link count - 2
+        Offset to the first attribute - 2
+        Usage flags - 2 (MftUsageFlags)
+        MFT record logical size - 4 (in bytes)
+        MFT record physical size - 4 (in bytes)
+        Base record # - 8
+        Next attribute ID - 2 (xp only?)
+        Padding  - 2 (xp only?)
+        MFT record # - 4 (xp only?)
+    '''
+
+    __slots__ = ("baad", "fx_offset", "fx_count", "lsn", "seq_number",
+        "hard_link_count", "first_attr_offset", "usage_flags",
+        "_entry_len", "entry_alloc_len",
+        "base_record_ref", "base_record_seq", "next_attr_id",
+        "mft_record")
+
+    def __init__(self, header=(None,)*14):
+        '''Creates a MFTHeader object. The content has to be an iterable
+        with precisely 14 elements in order.
+        If content is not provided, a tuple filled with 'None' is the default
+        argument.
+
+        Args:
+            content (iterable), where:
+                [0] (bool) - does the entry has 'baad' signature?
+                [1] (int) - offset to fixup array
+                [2] (int) - number of elements in the fixup array
+                [3] (int) - Log file sequence # (LSN)
+                [4] (int) - sequence number
+                [5] (int) - hard link count
+                [6] (int) - offset to the first attribute
+                [7] (MftUsageFlags) - usage flags
+                [8] (int) - entry length (in bytes)
+                [9] (int) - allocated size of the entry (in bytes)
+                [10] (int) - base record reference
+                [11] (int) - base record sequence
+                [12] (int) - next attribute id
+                [13] (int) - mft record number
+        '''
+        self.baad, self.fx_offset, self.fx_count, self.lsn, self.seq_number, \
+        self.hard_link_count, self.first_attr_offset, self.usage_flags, \
+        self._entry_len, self.entry_alloc_len, \
+        self.base_record_ref, self.base_record_seq, self.next_attr_id, \
+        self.mft_record = header
+
+    @classmethod
+    def get_static_content_size(cls):
+        '''Return the header size'''
+        return cls._REPR.size
+
+    @classmethod
+    def create_from_binary(cls, mft_config, binary_view):
+        '''Creates a new object MFTHeader from a binary stream. The binary
+        stream can be represented by a byte string, bytearray or a memoryview of the
+        bytearray.
+
+        Args:
+            binary_view (memoryview of bytearray) - A binary stream with the
+                information of the attribute
+
+        Returns:
+            MFTHeader: New object using hte binary stream as source
+        '''
+        sig, fx_offset, fx_count, lsn, seq_number, hard_link_count, first_attr_offset, \
+        usage_flags, entry_len, alloc_len, base_record, next_attr_id, record_n = \
+            cls._REPR.unpack(binary_view[:cls._REPR.size])
+
+        baad = None
+        if not mft_config.ignore_signature_check:
+            if sig == b"FILE":
+                baad = False
+            elif sig == b"BAAD":
+                baad = True
+            else:
+                raise HeaderError("Entry has no valid signature.", "MFTHeader")
+
+        if fx_offset < MFTHeader._REPR.size: #header[1] is fx_offset
+            raise HeaderError("Fix up array begins within the header.", "MFTHeader")
+        if first_attr_offset < cls._REPR.size: #first attribute offset < header size
+            raise HeaderError("First attribute offset points to inside of the header.", "MFTHeader")
+        if entry_len > alloc_len: #entry_len > entry_alloc_len
+            raise HeaderError("Logical size of the MFT is bigger than MFT allocated size.", "MFTHeader")
+
+        file_ref, file_seq = get_file_reference(base_record)
+        nw_obj = cls((baad, fx_offset, fx_count, lsn, seq_number, hard_link_count,
+            first_attr_offset, MftUsageFlags(usage_flags), entry_len, alloc_len,
+            file_ref, file_seq, next_attr_id, record_n))
+
+        return nw_obj
+
+    def __len__(self):
+        '''Returns the logical size of the mft entry'''
+        return self._entry_len
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return (f'{self.__class__.__name__}(is_baad={str(self.baad)},'
+                f'fx_offset={self.fx_offset},fx_count={self.fx_count},'
+                f'lsn={self.lsn},seq_number={self.seq_number},'
+                f'hard_link_count={self.hard_link_count},'
+                f'first_attr_offset={self.first_attr_offset},'
+                f'usage_flags={str(self.usage_flags)},entry_len={self._entry_len},'
+                f'entry_alloc_len={self.entry_alloc_len},base_record_ref={self.base_record_ref},'
+                f'base_record_seq={self.base_record_seq},next_attr_id={self.next_attr_id}, mft_record={self.mft_record})'
+                )
 
 class Datastream():
     '''Represents one datastream for a entry. This datastream has all the necessary
@@ -115,8 +230,9 @@ class Datastream():
         if data_attr.header.attr_name != self.name:
             raise DataStreamError(f"Data from a different stream '{data_attr.header.attr_name}' cannot be add to this stream")
 
-        if data_attr.header.is_non_resident():
-            nonr_header = data_attr.header.non_resident_header
+        #if data_attr.header.is_non_resident():
+        if data_attr.header.non_resident:
+            nonr_header = data_attr.header
             if self._data_runs is None:
                 self._data_runs = []
             if nonr_header.end_vcn > self.cluster_count:
@@ -127,7 +243,7 @@ class Datastream():
             self._data_runs.append((nonr_header.start_vcn, nonr_header.data_runs))
             self._data_runs_sorted = False
         else: #if it is resident
-            self.size = self.alloc_size = data_attr.header.resident_header.content_len
+            self.size = self.alloc_size = data_attr.header.content_len
             self._pending_processing = None
             #respects mft_config["load_data"]
             self._content = data_attr.content.content
@@ -216,14 +332,13 @@ class Attribute():
         self.content = content
 
     @classmethod
-    def create_from_binary(cls, mft_config, binary_view):
-        header = AttributeHeader.create_from_binary(mft_config, binary_view)
-        content = None
-
-        if not header.is_non_resident():
-            offset = header.resident_header.content_offset
-            length = header.resident_header.content_len
-            content = cls._dispatcher[header.attr_type_id](binary_view[offset:offset+length])
+    def create_from_binary(cls, non_resident, load_dataruns, binary_view):
+        if not non_resident:
+            header = ResidentAttrHeader.create_from_binary(binary_view)
+            content = cls._dispatcher[header.attr_type_id](binary_view[header.content_offset:header.content_offset+header.content_len])
+        else:
+            header = NonResidentAttrHeader.create_from_binary(load_dataruns, binary_view)
+            content = None
 
         return cls(header, content)
 
@@ -332,15 +447,16 @@ class MFTEntry():
         '''
         offset = 0
         load_attrs = mft_config._load_attrs
-        get_basic_attr_header_info = AttributeHeader.get_basic_attr_header_info
+        #get_basic_attr_header_info = AttributeHeader.get_basic_attr_header_info
 
         while (attrs_view[offset:offset+4] != b'\xff\xff\xff\xff'):
             #pass all the information to the attr, as we don't know how
             #much content the attribute has
             #try:
-            attr_type, attr_len = get_basic_attr_header_info(attrs_view[offset:])
+
+            attr_type, attr_len, non_resident = _get_attr_info(attrs_view[offset:])
             if attr_type in load_attrs:
-                attr = Attribute.create_from_binary(mft_config, attrs_view[offset:])
+                attr = Attribute.create_from_binary(non_resident, mft_config.load_dataruns, attrs_view[offset:])
                 if not attr.header.attr_type_id is AttrTypes.DATA:
                     self._add_attribute(attr)
                 else:

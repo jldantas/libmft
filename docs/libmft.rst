@@ -19,10 +19,10 @@ libmft.api module
     :undoc-members:
     :show-inheritance:
 
-libmft.attrcontent module
--------------------------
+libmft.attribute module
+-----------------------
 
-.. automodule:: libmft.attrcontent
+.. automodule:: libmft.attribute
     :members:
     :undoc-members:
     :show-inheritance:
@@ -39,14 +39,6 @@ libmft.flagsandtypes module
 ---------------------------
 
 .. automodule:: libmft.flagsandtypes
-    :members:
-    :undoc-members:
-    :show-inheritance:
-
-libmft.headers module
----------------------
-
-.. automodule:: libmft.headers
     :members:
     :undoc-members:
     :show-inheritance:
