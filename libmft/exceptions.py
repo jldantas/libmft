@@ -5,13 +5,15 @@ This module contains all the exceptions that can be raised by the library.
 It is important to note that some other core language exceptions can still
 be raised.
 
-Exceptions hierachy
-- MFTException
-|-- MFTError
-|-- FixUpError
-|-- EntryError
-||--- HeaderError
-||--- DataStreamError
+Exceptions hierachy::
+
+    - MFTException
+    |-- MFTError
+    |-- FixUpError
+    |-- EntryError
+    ||--- HeaderError
+    ||--- DataStreamError
+
 '''
 
 #TODO configure this based on the level of logging

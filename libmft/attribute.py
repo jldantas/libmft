@@ -217,6 +217,32 @@ def _create_attrcontent_class(name, fields, inheritance=(object,), data_structur
 # DATA_RUN
 #******************************************************************************
 # Data runs are part of the non resident header.
+#TODO replace the datarun tuple by a class?
+# class DataRun():
+#     def __init__(self, dr_len, offset):
+#         self._dr_len = dr_len
+#         self.offset = offset
+#
+#     def __getitem__(self, index):
+#         if index == 0:
+#             return self._dr_len
+#         elif index == 1:
+#             return self.offset
+#         else:
+#             raise IndexError("Invalid index for datarun object")
+#
+#     def __eq__(self, other):
+#         if isinstance(other, self.__class__):
+#             return self._dr_len == other._dr_len and self.offset == other.offset
+#         else:
+#             return False
+#
+#     def __len__(self):
+#         return self._dr_len
+#
+#     def __repr__(self):
+#         return f"{self.__class__.__name__}(dr_len={self._dr_len},offset={self.offset})"
+
 class DataRuns():
     '''Represents the data runs of a non-resident attribute.
 
@@ -278,6 +304,7 @@ class DataRuns():
                 dr_offset = None
             offset += header_size + length_len + length_offset
             nw_obj.data_runs.append((dr_length, dr_offset))
+            #nw_obj.data_runs.append(DataRun(dr_length, dr_offset))
 
         _MOD_LOGGER.debug("DataRuns object created successfully")
 

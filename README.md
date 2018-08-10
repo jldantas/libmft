@@ -112,6 +112,7 @@ P.S.: The implementation I used can be seen in the file parallel.py
 - Added EA and SECURITY_DESCRIPTOR attributes
 - Fixed a problem with symbolic links and junction points
 - Small fix for reparse point flags
+- Changed how attribute headers are represented (API break)
 
 ### Version 0.7
 

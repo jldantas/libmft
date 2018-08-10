@@ -79,7 +79,7 @@ def test_my_mft():
     #test = "../../my_mft.bin"
     test = "c:/cases/my_mft.bin"
     mft_config = libmft.api.MFTConfig()
-    mft_config.load_dataruns = False
+    mft_config.load_dataruns = True
     mft_config.load_object_id = False
     mft_config.load_sec_desc = False
     mft_config.load_idx_root = False
@@ -102,6 +102,8 @@ def test_my_mft():
         #mft = libmft.api.MFT(mft_file)
         mft = libmft.api.MFT(mft_file, mft_config)
         #print(mft[75429])
+        [print(a.dataruns) for a in mft[75429].data_streams if not a.is_resident]
+        print("*"*80,"\n",mft[75429])
         #test_1(mft)
         for entry in mft:
             # try:

@@ -3,8 +3,6 @@
 -Definition of the API
 This module is reponsible for the main parts that are exposed to the calling application.
 
-
-
 - Structure of the API
 
 The MFT has a number of different entries of type MFTEntry, these entries
@@ -46,16 +44,17 @@ Diagram::
        +----+ MFTEntry |       +------------+
             +----------+
 
+Each entity is:
 
--- MFT - Represents the MFT
--- MFTEntry - Represents one entry from the logical perspective, i.e., even if
+* MFT - Represents the MFT
+* MFTEntry - Represents one entry from the logical perspective, i.e., even if
     the attributes are spread across multiple entry in the file, they will be
     organized under the base entry
--- MFTHeader - Represents the header of the MFT entry
--- Attribute - Represents one attribute
--- AttributeHeader - Represents the header of the attribute, including if it is
+* MFTHeader - Represents the header of the MFT entry
+* Attribute - Represents one attribute
+* AttributeHeader - Represents the header of the attribute, including if it is
     resident or non-resident
--- The content depends on the type of attribute
+* The content depends on the type of attribute
 
 - Considerations
 
@@ -200,12 +199,26 @@ class MFTHeader():
                 )
 
 class Datastream():
-    '''Represents one datastream for a entry. This datastream has all the necessary
-    information, for example, name, size, allocated size, number of clusters, etc.
-    The data runs, if loaded, are guaranteed to be in order after a call to get_dataruns.
+    '''Represents one datastream for an entry.
 
-    The main idea is that this way we can save memory and normalize
-    access to a data independently if it is resident or non resident.
+    This class has all the necessary information to represent a NTFS datastream.
+    Because it is possible to have multiple DATA attributes spread or not across different
+    entries and resident data as well, trying to interpret everything directly from
+    the entry gets messy and not uniform.
+
+    The Datastream class exists to try to solve these problems. With it we can
+    access a datastream, independently of the type, in a uniform wayself.
+
+    Args:
+        name (str): The name of the datastream
+
+    Attributes:
+        name (str): Datastream's name
+        size (int): Logical size, in bytes, of a datastream, effectively speaking,
+            this is the size of the file
+        alloc_size (int): Allocated size, in bytes, on the disk. This is supposed
+            to be different from ``size`` in case of a sparse file
+        cluster_count (int): Number of clusters allocated for the datastream
     '''
     def __init__(self, name=None):
         '''Initialize on datastream. The only parameter accepted is the
@@ -223,6 +236,38 @@ class Datastream():
         self._content = None
         self._data_runs_sorted = False
 
+    def _get_content(self):
+        '''Returns the content of a resident datastream'''
+        if not self.is_resident():
+            raise DataStreamError("Non resident datastream don't have content")
+
+        return self._content
+
+    def _is_resident(self):
+        '''Check is the datastream is resident or non resident. In case of it
+        begin resident, it is possible to recover the content of the datastream
+        '''
+        if self._data_runs is None:
+            return True
+        else:
+            return False
+
+    def _get_dataruns(self):
+        '''Returns a list of dataruns, in order.
+        '''
+        if self._data_runs is None:
+            raise DataStreamError("Resident datastream don't have dataruns")
+
+        if not self._data_runs_sorted:
+            self._data_runs.sort(key=_itemgetter(0))
+            self._data_runs_sorted = True
+
+        return [data[1] for data in self._data_runs]
+
+    content = property(_get_content, doc="The content of a resident datastream")
+    is_resident = property(_is_resident, doc="True if the datastream is resident, False otherwise")
+    dataruns = property(_get_dataruns, doc="Dataruns associated with a datastream")
+
     def add_data_attribute(self, data_attr):
         '''Interprets a DATA attribute and add it to the datastream.'''
         if data_attr.header.attr_type_id is not AttrTypes.DATA:
@@ -230,7 +275,6 @@ class Datastream():
         if data_attr.header.attr_name != self.name:
             raise DataStreamError(f"Data from a different stream '{data_attr.header.attr_name}' cannot be add to this stream")
 
-        #if data_attr.header.is_non_resident():
         if data_attr.header.non_resident:
             nonr_header = data_attr.header
             if self._data_runs is None:
@@ -265,37 +309,18 @@ class Datastream():
             self._data_runs += source_ds._data_runs
             self._data_runs_sorted = False
 
-    def get_dataruns(self):
-        '''Returns a list of dataruns, in order.
-        '''
-        if self._data_runs is None:
-            raise DataStreamError("Resident datastream don't have dataruns")
 
-        if not self._data_runs_sorted:
-            self._data_runs.sort(key=_itemgetter(0))
-
-        return [data[2] for data in self._data_runs]
-
-    def get_content(self):
-        '''Returns the content of a resident datastream'''
-        if not self.is_resident():
-            raise DataStreamError("Non resident datastream don't have content")
-
-        return self._content
-
-    def is_resident(self):
-        '''Check is the datastream is resident or non resident. In case of it
-        begin resident, it is possible to recover the content of the datastream
-        '''
-        if self._data_runs is None:
-            return True
-        else:
-            return False
+    # def __iadd__(self, other):
+    #     if isinstance(other, Data):
+    #         return self.x + other.x
+    #     elif isinstance(other, Datastream):
+    #         return self.x + other
+    #     else:
+    #         raise TypeError("unsupported operand type(s) for +: '{}' and '{}'").format(self.__class__, type(other))
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(name={}, size={}, alloc_size={}, cluster_count={}, _data_runs={}, _content={}, _data_runs_sorted={})'.format(
-            self.name, self.size, self.alloc_size, self.cluster_count, self._data_runs, self._content, self._data_runs_sorted)
+        return f'{self.__class__.__name__}(name={self.name}, size={self.size}, alloc_size={self.alloc_size}, cluster_count={self.cluster_count}, _data_runs={self._data_runs}, _content={self._content}, _data_runs_sorted={self._data_runs_sorted})'
 
 class Attribute():
     '''Represents an attribute, header and content. Independently the type of
