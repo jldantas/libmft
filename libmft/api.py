@@ -82,6 +82,108 @@ from libmft.exceptions import FixUpError, DataStreamError, EntryError, MFTError,
 
 _MOD_LOGGER = logging.getLogger(__name__)
 
+
+class MFTConfig():
+    '''Configures how the libary behaves.
+
+    The MFT is vast! There are plenty of details that may or may not be relevant
+    to a particular application. Based on this, this class allows for some
+    configurations to be passed to the library, modifying  what and how it is
+    interpreted. That it is possible to configure the library to be as fast as
+    possible.
+
+    Warning:
+        The option of parsing the MFT from an image has not been implemented!
+
+    Attributes:
+        entry_size (int): Size of a MFT entry. If it is zero the library will
+            try to auto detect the size. Should be left alone unless you are
+            sure of the size. Default is ``0``.
+        apply_fixup_array (bool): Enable or disable the patching of the fix
+            up array. If you are reading MFT from a memory dump, this should
+            be set to ``False``. Default is ``True``.
+        ignore_signature_check (bool): Enable or disable MFT entry signature check.
+            This option controls if the 'FILE' or 'BAAD' signature will be checked.
+            If this is disabled, the library will not parse this information.
+        create_initial_information (bool): If you are reading a dumped MFT file,
+            this should be ``True``. This allows the library to do a pre-parsing
+            of the MFT and find the relationship between the entries. It should
+            be ``False`` in case of having the whole disk image.
+        load_dataruns (bool): Enables or disables the parsing of dataruns. If
+            you don't have the disk image, loading the dataruns  is pretty useless
+            and quite computationally intensive and should be disabled.
+        load_std_info (bool): Enables or disables the parsing of the
+            STANDARD_INFORMATION attribute.
+        load_attr_list (bool): Enables or disables the parsing of the
+            ATTRIBUTE_LIST attribute.
+        load_file_name (bool): Enables or disables the parsing of the
+            FILE_NAME attribute.
+        load_object_id (bool): Enables or disables the parsing of the
+            OBJECT_ID attribute.
+        load_sec_desc (bool): Enables or disables the parsing of the
+            SECURITY_DESCRIPTOR attribute.
+        load_vol_name (bool): Enables or disables the parsing of the
+            VOLUME_NAME attribute.
+        load_vol_info (bool): Enables or disables the parsing of the
+            VOLUME_INFORMATION attribute.
+        load_idx_root (bool): Enables or disables the parsing of the
+            INDEX_ROOT attribute.
+        load_idx_alloc (bool): Enables or disables the parsing of the
+            INDEX_ALLOCATION attribute.
+        load_bitmap (bool): Enables or disables the parsing of the
+            BITMAP attribute.
+        load_reparse (bool): Enables or disables the parsing of the
+            REPARSE_POINT attribute.
+        load_ea_info (bool): Enables or disables the parsing of the
+            EA_INFORMATION attribute.
+        load_ea (bool): Enables or disables the parsing of the
+            EA attribute.
+        load_log_tool_str (bool): Enables or disables the parsing of the
+            LOGGED_TOOL_STREAM attribute.
+        load_datastream (bool): Enables or disables the parsing of the
+            DATA attribute.
+    '''
+
+    def __init__(self):
+        self._load_attrs = set()
+        self.entry_size = 0
+        self.apply_fixup_array = True
+        self.ignore_signature_check = True
+        self.create_initial_information = True
+        self.load_dataruns = True
+
+        # the "load attributes" is actually a set object with the entries
+        # this allows quick comparison to check if we should parse an attribute
+        # or not. 
+        for attr_type in AttrTypes:
+            self._load_attrs.add(attr_type)
+
+    def _get_load_attr(self, attr_type):
+            return attr_type in self._load_attrs
+
+    def _set_load_attr(self, attr_type, case):
+        if case:
+            self._load_attrs.add(attr_type)
+        else:
+            if attr_type in self._load_attrs:
+                self._load_attrs.remove(attr_type)
+
+    load_std_info = property(lambda a: AttrTypes.STANDARD_INFORMATION in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.STANDARD_INFORMATION, x))
+    load_attr_list = property(lambda a: AttrTypes.ATTRIBUTE_LIST in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.ATTRIBUTE_LIST, x))
+    load_file_name = property(lambda a: AttrTypes.FILE_NAME in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.FILE_NAME, x))
+    load_object_id = property(lambda a: AttrTypes.OBJECT_ID in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.OBJECT_ID, x))
+    load_sec_desc = property(lambda a: AttrTypes.SECURITY_DESCRIPTOR in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.SECURITY_DESCRIPTOR, x))
+    load_vol_name = property(lambda a: AttrTypes.VOLUME_NAME in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.VOLUME_NAME, x))
+    load_vol_info = property(lambda a: AttrTypes.VOLUME_INFORMATION in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.VOLUME_INFORMATION, x))
+    load_idx_root = property(lambda a: AttrTypes.INDEX_ROOT in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.INDEX_ROOT, x))
+    load_idx_alloc = property(lambda a: AttrTypes.INDEX_ALLOCATION in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.INDEX_ALLOCATION, x))
+    load_bitmap = property(lambda a: AttrTypes.BITMAP in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.BITMAP, x))
+    load_reparse = property(lambda a: AttrTypes.REPARSE_POINT in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.REPARSE_POINT, x))
+    load_ea_info = property(lambda a: AttrTypes.EA_INFORMATION in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.EA_INFORMATION, x))
+    load_ea = property(lambda a: AttrTypes.EA in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.EA, x))
+    load_log_tool_str = property(lambda a: AttrTypes.LOGGED_TOOL_STREAM in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.LOGGED_TOOL_STREAM, x))
+    load_datastream = property(lambda a: AttrTypes.DATA in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.DATA, x))
+
 class MFTHeader():
     '''Represent the MFT header present in all MFT entries.'''
     #TODO create a way of dealing with XP only artefacts
@@ -309,14 +411,18 @@ class Datastream():
             self._data_runs += source_ds._data_runs
             self._data_runs_sorted = False
 
+    def __iadd__(self, other):
+        if isinstance(other, Data):
+            self.add_data_attribute(other)
+        elif isinstance(other, Datastream):
+            self.add_from_datastream(other)
+        else:
+            raise NotImplemented
 
-    # def __iadd__(self, other):
-    #     if isinstance(other, Data):
-    #         return self.x + other.x
-    #     elif isinstance(other, Datastream):
-    #         return self.x + other
-    #     else:
-    #         raise TypeError("unsupported operand type(s) for +: '{}' and '{}'").format(self.__class__, type(other))
+        return self
+
+    def __len__(self):
+        return self.size
 
     def __repr__(self):
         'Return a nicely formatted representation string'
@@ -378,8 +484,7 @@ class Attribute():
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return self.__class__.__name__ + '(header={}, content={})'.format(
-            self.header, self.content)
+        return f'{self.__class__.__name__}(header={self.header}, content={self.content})'
 
 class MFTEntry():
     '''Represents one LOGICAL MFT entry. That means the entry is the base entry
@@ -668,43 +773,7 @@ class _MFTEntryStub():
         return self.__class__.__name__ + '(mft_record={}, seq_number={}, base_record_ref={}, base_record_seq={})'.format(
             self.mft_record, self.seq_number, self.base_record_ref, self.base_record_seq)
 
-class MFTConfig():
-    def __init__(self):
-        self._load_attrs = set()
-        self.entry_size = 0
-        self.apply_fixup_array = True
-        self.ignore_signature_check = True
-        self.create_initial_information = True
-        self.load_dataruns = True
 
-        for attr_type in AttrTypes:
-            self._load_attrs.add(attr_type)
-
-    def _get_load_attr(self, attr_type):
-            return attr_type in self._load_attrs
-
-    def _set_load_attr(self, attr_type, case):
-        if case:
-            self._load_attrs.add(attr_type)
-        else:
-            if attr_type in self._load_attrs:
-                self._load_attrs.remove(attr_type)
-
-    load_std_info = property(lambda a: AttrTypes.STANDARD_INFORMATION in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.STANDARD_INFORMATION, x))
-    load_attr_list = property(lambda a: AttrTypes.ATTRIBUTE_LIST in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.ATTRIBUTE_LIST, x))
-    load_file_name = property(lambda a: AttrTypes.FILE_NAME in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.FILE_NAME, x))
-    load_object_id = property(lambda a: AttrTypes.OBJECT_ID in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.OBJECT_ID, x))
-    load_sec_desc = property(lambda a: AttrTypes.SECURITY_DESCRIPTOR in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.SECURITY_DESCRIPTOR, x))
-    load_vol_name = property(lambda a: AttrTypes.VOLUME_NAME in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.VOLUME_NAME, x))
-    load_vol_info = property(lambda a: AttrTypes.VOLUME_INFORMATION in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.VOLUME_INFORMATION, x))
-    load_idx_root = property(lambda a: AttrTypes.INDEX_ROOT in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.INDEX_ROOT, x))
-    load_idx_alloc = property(lambda a: AttrTypes.INDEX_ALLOCATION in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.INDEX_ALLOCATION, x))
-    load_bitmap = property(lambda a: AttrTypes.BITMAP in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.BITMAP, x))
-    load_reparse = property(lambda a: AttrTypes.REPARSE_POINT in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.REPARSE_POINT, x))
-    load_ea_info = property(lambda a: AttrTypes.EA_INFORMATION in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.EA_INFORMATION, x))
-    load_ea = property(lambda a: AttrTypes.EA in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.EA, x))
-    load_log_tool_str = property(lambda a: AttrTypes.LOGGED_TOOL_STREAM in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.LOGGED_TOOL_STREAM, x))
-    load_datastream = property(lambda a: AttrTypes.DATA in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.DATA, x))
 
 
 class MFT():
