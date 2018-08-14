@@ -566,6 +566,24 @@ class MFTEntry():
         '''See class docstring.'''
         self.header, self.attrs, self.data_streams = header, attrs, []
 
+
+    def _deleted(self):
+        '''Returns True if an entry is marked as deleted, otherwise, returns False.'''
+        if self.header.usage_flags & MftUsageFlags.IN_USE:
+            return False
+        else:
+            return True
+
+    def _directory(self):
+        '''Returns True is the entry is a directory, otherwise, returns False.'''
+        if self.header.usage_flags & MftUsageFlags.DIRECTORY:
+            return True
+        else:
+            return False
+
+    is_deleted = property(_deleted, doc="True if an entry is marked as deleted, otherwise, returns False")
+    is_directory = property(_directory, doc="True if an entry is marked as deleted, otherwise, returns False")
+
     @classmethod
     def create_from_binary(cls, mft_config, binary_data, entry_number):
         #TODO test carefully how to find the correct index entry, specially with NTFS versions < 3
@@ -663,8 +681,16 @@ class MFTEntry():
             offset += attr_len
 
     def merge_entries(self, source_entry):
-        '''Merge one entry attributes and datastreams with the current entry.
+        '''Merge two entries.
+
+        Allow the merging of two MFTEntries copying the attributes to the correct
+        place and the datastreams.
+
+        Args:
+            source_entry (:obj:`MFTEntry`) - Source entry where the data will be
+                copied from
         '''
+        #TODO should we change this to an overloaded iadd?
         #TODO I really don't like this. We are spending cycles to load things that are going to be discarted. Check another way.
         #copy the attributes
         for list_attr in source_entry.attrs.values():
@@ -679,15 +705,39 @@ class MFTEntry():
                 self.data_streams.append(stream)
 
     def get_attributes(self, attr_type):
-        '''Returns a list with one or more attributes of type "attr_type", in
-        case they exist, otherwise, returns None. The attr_type must be a AttrTypes enum.'''
+        '''Returns all the attributes of the type ``attr_type``.
+
+        Args:
+            source_entry (:obj:`AttrTypes`) - Type of the attribute
+
+        Returns:
+            A list with all the attributes of a requested type or None if no
+            attribute is found
+        '''
         if attr_type in self.attrs:
             return self.attrs[attr_type]
         else:
             return None
 
+    def has_attribute(self, attr_type):
+        '''Check if the entry has a particular type of attribute.
+
+        Args:
+            source_entry (:obj:`AttrTypes`) - Type of the attribute
+
+        Returns:
+            True if the entry has the attribute type, False otherwise.
+        '''
+        if attr_type in self.attrs:
+            return True
+        return False
+
     def get_datastream(self, name=None):
-        '''Returns the size of the data or an ads. The ads has to be the name of the file'''
+        '''Returns a datastream based on name.
+
+        Args:
+            name (str) - Name of the datastream
+        '''
         return self._find_datastream(name)
 
     def get_datastream_names(self):
@@ -705,24 +755,25 @@ class MFTEntry():
             return None
 
     def get_main_filename_attr(self):
-        '''Returns the main filename attribute of the entry. This is found
-        searching for the lowest attribute id, once that has been found, it loops
-        again over the filenames attributes searching other attributes that represent
-        the same name and return the best one possible based on the type of the
-        name (name_type)
+        '''Returns the main filename attribute of the entry.
 
+        As an entry can have multiple FILENAME attributes, this function allows
+        to return the main one, i.e., the one with the lowest attribute id and
+        the "biggest" namespace.
         '''
         fn_attrs = self.get_attributes(AttrTypes.FILE_NAME)
         high_attr_id = 0xFFFFFFFF
         main_fn = None
 
         if fn_attrs is not None:
+            #search for the lowest id, that will give the first FILE_NAME
             for fn_attr in fn_attrs:
                 if fn_attr.header.attr_id < high_attr_id:
                     main_fn = fn_attr
                     high_attr_id = fn_attr.header.attr_id
 
             #TODO is this necessary? Maybe the first name is always the with with the biggest namespace
+            # after we have the lowest, search for same name, but the biggest namespace
             for fn_attr in fn_attrs:
                 if main_fn.content.parent_ref == fn_attr.content.parent_ref and \
                     main_fn.content.parent_seq == fn_attr.content.parent_seq and \
@@ -733,11 +784,10 @@ class MFTEntry():
 
     def get_unique_filename_attrs(self):
         fn_attrs = self.get_attributes(AttrTypes.FILE_NAME)
-        control = None
+        control = {}
         result = None
 
         if fn_attrs is not None:
-            control = {}
             for fn in fn_attrs:
                 temp = (fn.content.parent_ref, fn.content.parent_seq)
                 if temp not in control:
@@ -749,27 +799,11 @@ class MFTEntry():
 
         return result
 
-    def is_deleted(self):
-        '''Returns True if an entry is marked as deleted, otherwise, returns False.'''
-        if self.header.usage_flags & MftUsageFlags.IN_USE:
-            return False
-        else:
-            return True
-
-    def is_directory(self):
-        '''Returns True is the entry is a directory, otherwise, returns False.'''
-        if self.header.usage_flags & MftUsageFlags.DIRECTORY:
-            return True
-        else:
-            return False
-
     def __repr__(self):
         'Return a nicely formatted representation string'
         #TODO print the slack?
         return self.__class__.__name__ + '(header={}, attrs={}, data_stream={})'.format(
             self.header, self.attrs, self.data_streams)
-
-
 
 class _MFTEntryStub():
     #TODO create a way of dealing with XP only artefacts
@@ -794,17 +828,15 @@ class _MFTEntryStub():
             #first fixup value, so no need to apply it
             seq_number, ref = cls._REPR.unpack(binary_stream)
             file_ref, file_seq = get_file_reference(ref)
-            nw_obj = cls()
 
-            nw_obj.mft_record, nw_obj.seq_number, nw_obj.base_record_ref, \
-            nw_obj.base_record_seq = record_n, seq_number, file_ref, file_seq
+            nw_obj = cls((record_n, seq_number, file_ref, file_seq))
         else:
             _MOD_LOGGER.debug("Entry %d is empty.", record_n)
 
         return nw_obj
 
     @classmethod
-    def get_static_content_size(cls):
+    def get_representation_size(cls):
         '''Returns the static size of the content never taking in consideration
         variable fields, for example, names.
 
@@ -813,7 +845,6 @@ class _MFTEntryStub():
         '''
         return cls._REPR.size
 
-    #TODO change this to receive the numbers instead of entry, so the api is "normalized"?
     def is_related(self, child_entry):
         '''Compares if two entries are related, based on the reference and sequence
         numbers.
@@ -829,29 +860,28 @@ class _MFTEntryStub():
         else:
             return False
 
-
     def __repr__(self):
         'Return a nicely formatted representation string'
-        #TODO print the slack?
-        return self.__class__.__name__ + '(mft_record={}, seq_number={}, base_record_ref={}, base_record_seq={})'.format(
-            self.mft_record, self.seq_number, self.base_record_ref, self.base_record_seq)
-
-
-
+        return f'{self.__class__.__name__}(mft_record={self.mft_record}, seq_number={self.seq_number}, base_record_ref={self.base_record_ref}, base_record_seq={self.base_record_seq})'
 
 class MFT():
-    '''This class represents a MFT file. It has a bunch of MFT entries
-    that have been parsed
+    '''Represents a MFT.
+
+    A MFT is composed of multiple entries and the entries can be related to one
+    another. With this class it is possible to get all these relations and
+    access it in a standard way.
+
+    Args:
+        file_pointer (?): Pointer to a file opened in read and binary mode
+        mft_config (:obj:`MFTConfig`): Configuration for the library. If none
+            is provided, the default configuration is provided.
+
+    Attributes:
+        TODO?
     '''
 
     def __init__(self, file_pointer, mft_config=MFTConfig()):
-        #TODO redo documentation
-        '''The initialization process takes a file like object "file_pointer"
-        and loads it in the internal structures. "use_cores" can be definied
-        if multiple cores are to be used. The "size" argument is the size
-        of the MFT entries. If not provided, the class will try to auto detect
-        it.
-        '''
+        '''See class docstring.'''
         self.file_pointer = file_pointer
         self.mft_config = mft_config
         self.mft_entry_size = self.mft_config.entry_size
@@ -867,53 +897,6 @@ class MFT():
         if self.mft_config.create_initial_information:
             self._load_stub_info()
 
-    def copy_from_loaded_mft(other_mft):
-        #TODO do we need this?
-        import copy
-        self._entries_parent_child = copy.deepcopy(other_mft._entries_parent_child)
-        self._entries_child_parent = copy.deepcopy(other_mft._entries_child_parent)
-        self._empty_entries = copy.deepcopy(other_mft._empty_entries)
-        self._number_valid_entries = other_mft._number_valid_entries
-
-    def get_entry_full_path(self, entry_number=None, entry=None):
-        if entry_number is None and entry is None:
-            raise MFTError("Provide entry_number or entry parameters")
-        if entry_number is not None and entry is not None:
-            raise MFTError("Can't provide both entry_number and entry")
-
-        if entry_number:
-            working_entry = self[entry_number]
-        elif entry:
-            working_entry = entry
-        else:
-            raise MFTError("Something went very wrong when parsing the function arguments.")
-
-        fn_attr = working_entry.get_main_filename_attr()
-        if fn_attr is None:
-            raise EntryError("No FILENAME attribute available, can't calculate path", b"", working_entry.header.mft_record)
-
-        names = [fn_attr.content.name]
-        root_id = 5
-        index, seq = fn_attr.content.parent_ref, fn_attr.content.parent_seq
-        is_orphan = False
-
-        while index != root_id:
-            try:
-                parent_entry = self[index]
-
-                if seq != parent_entry.header.seq_number:
-                    is_orphan = True
-                    break
-                else:
-                    parent_fn_attr = parent_entry.get_main_filename_attr()
-                    index, seq = parent_fn_attr.content.parent_ref, parent_fn_attr.content.parent_seq
-                    names.append(parent_fn_attr.content.name)
-            except ValueError as e:
-                is_orphan = True
-                break
-
-        return (is_orphan, "\\".join(reversed(names)))
-
     def _load_stub_info(self):
         '''Load the minimum amount of information related to a MFT. This allows
         the library to map all the relations between the entries, so the information
@@ -923,7 +906,7 @@ class MFT():
         this case, we can't find the relationship using only the entry.
         '''
         mft_entry_size = self.mft_entry_size
-        read_size = _MFTEntryStub.get_static_content_size()
+        read_size = _MFTEntryStub.get_representation_size()
         data_buffer = bytearray(read_size)
         temp = []
 
@@ -965,6 +948,78 @@ class MFT():
 
         return entry
 
+    # def copy_from_loaded_mft(other_mft):
+    #     #TODO do we need this?
+    #     import copy
+    #     self._entries_parent_child = copy.deepcopy(other_mft._entries_parent_child)
+    #     self._entries_child_parent = copy.deepcopy(other_mft._entries_child_parent)
+    #     self._empty_entries = copy.deepcopy(other_mft._empty_entries)
+    #     self._number_valid_entries = other_mft._number_valid_entries
+
+    def get_entry_full_path(self, entry_number=None, entry=None):
+        '''Returns the full path of an entry.
+
+        Entries have only their own name and references. To build a full path
+        it is necessary to jump across the MFT using the reference to rebuild
+        the path.
+
+        Also, the MFT entry might still exist, but the file has been deleted,
+        depending on the state of the MFT, the path might not be fully reconstructable,
+        these entries are called "orphan".
+
+        Note:
+            Only use entry_number OR entry parameter. Providing both of them is
+            going to cause an exception.
+
+        Args:
+            entry_number (int): Entry number
+            entry_number (:obj:`MFTEntry`): Entry
+
+        Returns:
+            tuple(bool, str): A tuple where the first element is a boolean that
+                is ``True`` if the the file is orphan and ``False`` if not. The
+                second element is a string with the full path
+        '''
+        if entry_number is None and entry is None:
+            raise MFTError("Provide entry_number or entry parameters")
+        if entry_number is not None and entry is not None:
+            raise MFTError("Can't provide both entry_number and entry")
+
+        if entry_number:
+            working_entry = self[entry_number]
+        elif entry:
+            working_entry = entry
+        else:
+            raise MFTError("Something went very wrong when parsing the function arguments.")
+
+        fn_attr = working_entry.get_main_filename_attr()
+        if fn_attr is None:
+            raise EntryError("No FILENAME attribute available, can't calculate path", b"", working_entry.header.mft_record)
+
+        names = [fn_attr.content.name]
+        root_id = 5
+        index, seq = fn_attr.content.parent_ref, fn_attr.content.parent_seq
+        is_orphan = False
+
+        #search until hit the root entry
+        while index != root_id:
+            try:
+                parent_entry = self[index]
+                #if the sequence number is wrong, something changed = orphan
+                if seq != parent_entry.header.seq_number:
+                    is_orphan = True
+                    break
+                else:
+                    parent_fn_attr = parent_entry.get_main_filename_attr()
+                    index, seq = parent_fn_attr.content.parent_ref, parent_fn_attr.content.parent_seq
+                    names.append(parent_fn_attr.content.name)
+            except ValueError as e:
+                #if the entry itself no longer exists = orphan
+                is_orphan = True
+                break
+
+        return (is_orphan, "\\".join(reversed(names)))
+
     def __iter__(self):
         returned = 0
 
@@ -979,8 +1034,7 @@ class MFT():
                 returned += 1
                 yield self[mft_record_n]
 
-
-    @lru_cache(512)
+    @lru_cache(1024)
     def __getitem__(self, index):
         '''Return the specific MFT entry. In case of an empty MFT, it will return
         None'''

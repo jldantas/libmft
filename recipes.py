@@ -79,7 +79,7 @@ def test_my_mft():
     #test = "../../my_mft.bin"
     test = "c:/cases/my_mft.bin"
     mft_config = libmft.api.MFTConfig()
-    mft_config.load_dataruns = True
+    mft_config.load_dataruns = False
     mft_config.load_object_id = False
     mft_config.load_sec_desc = False
     mft_config.load_idx_root = False
@@ -105,8 +105,8 @@ def test_my_mft():
         #print("*"*80,"\n",mft[75429])
         #test_1(mft)
         for entry in mft:
-            if len(entry.data_streams) > 2:
-                print(entry)
+            # if len(entry.data_streams) > 2:
+            #     print(entry)
             # try:
             #     print(mft.get_entry_full_path(entry=entry))
             # except EntryError as e:
