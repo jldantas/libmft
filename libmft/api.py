@@ -154,7 +154,7 @@ class MFTConfig():
 
         # the "load attributes" is actually a set object with the entries
         # this allows quick comparison to check if we should parse an attribute
-        # or not. 
+        # or not.
         for attr_type in AttrTypes:
             self._load_attrs.add(attr_type)
 
@@ -167,6 +167,8 @@ class MFTConfig():
         else:
             if attr_type in self._load_attrs:
                 self._load_attrs.remove(attr_type)
+
+    attribute_load_list = property(lambda a: a._load_attrs, doc="A set with the elements that should be parsed")
 
     load_std_info = property(lambda a: AttrTypes.STANDARD_INFORMATION in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.STANDARD_INFORMATION, x))
     load_attr_list = property(lambda a: AttrTypes.ATTRIBUTE_LIST in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.ATTRIBUTE_LIST, x))
@@ -184,8 +186,58 @@ class MFTConfig():
     load_log_tool_str = property(lambda a: AttrTypes.LOGGED_TOOL_STREAM in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.LOGGED_TOOL_STREAM, x))
     load_datastream = property(lambda a: AttrTypes.DATA in a._load_attrs, lambda a, x : a._set_load_attr(AttrTypes.DATA, x))
 
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return (f'{self.__class__.__name__}(entry_size={self.entry_size}, '
+                f'apply_fixup_array={self.apply_fixup_array}, ignore_signature_check={self.ignore_signature_check}, '
+                f'create_initial_information={self.create_initial_information}, '
+                f'load_dataruns={self.load_dataruns}, _load_attrs={self._load_attrs})'
+               )
+
 class MFTHeader():
-    '''Represent the MFT header present in all MFT entries.'''
+    '''Represent the MFT header present in all MFT entries.
+
+    The MFT header contains a lot of information related to the entry. Control
+    information, where the attribute starts, references for other entries, etc.
+    This class allows to get all that information.
+
+    Note:
+        This class receives an Iterable as argument, the "Parameters/Args" section
+        represents what must be inside the Iterable. The Iterable MUST preserve
+        order or things might go boom.
+
+    Args:
+        content[0] (bool): BAAD flag (does the entry has 'baad' signature?)
+        content[1] (int): Offset to fixup array
+        content[2] (int): Number of elements in the fixup array
+        content[3] (int): Log file sequence # (LSN)
+        content[4] (int): Sequence number
+        content[5] (int): Hard link count
+        content[6] (int): Offset to the first attribute
+        content[7] (:obj:`MftUsageFlags`): Usage flags
+        content[8] (int): Entry length (in bytes)
+        content[9] (int): Allocated size of the entry (in bytes)
+        content[10] (int): Base record reference
+        content[11] (int): Base record sequence
+        content[12] (int): Next attribute id
+        content[13] (int): Mft record number
+
+
+    Attributes:
+        baad (bool): BAAD flag (does the entry has 'baad' signature?)
+        fx_offset (int): Offset to fixup array
+        fx_count (int): Number of elements in the fixup array
+        lsn (int): Log file sequence # (LSN)
+        seq_number (int): Sequence number
+        hard_link_count (int): Hard link count
+        first_attr_offset (int): Offset to the first attribute
+        usage_flags (:obj:`MftUsageFlags`): Usage flags
+        entry_alloc_len (int): Allocated size of the entry (in bytes)
+        base_record_ref (int): Base record reference
+        base_record_seq (int): Base record sequence
+        next_attr_id (int): Next attribute id
+        mft_record (int): Mft record number
+    '''
     #TODO create a way of dealing with XP only artefacts
     _REPR = struct.Struct("<4s2HQ4H2IQH2xI")
     ''' Signature - 4 = FILE or BAAD
@@ -211,28 +263,7 @@ class MFTHeader():
         "mft_record")
 
     def __init__(self, header=(None,)*14):
-        '''Creates a MFTHeader object. The content has to be an iterable
-        with precisely 14 elements in order.
-        If content is not provided, a tuple filled with 'None' is the default
-        argument.
-
-        Args:
-            content (iterable), where:
-                [0] (bool) - does the entry has 'baad' signature?
-                [1] (int) - offset to fixup array
-                [2] (int) - number of elements in the fixup array
-                [3] (int) - Log file sequence # (LSN)
-                [4] (int) - sequence number
-                [5] (int) - hard link count
-                [6] (int) - offset to the first attribute
-                [7] (MftUsageFlags) - usage flags
-                [8] (int) - entry length (in bytes)
-                [9] (int) - allocated size of the entry (in bytes)
-                [10] (int) - base record reference
-                [11] (int) - base record sequence
-                [12] (int) - next attribute id
-                [13] (int) - mft record number
-        '''
+        '''See base class doctstring.'''
         self.baad, self.fx_offset, self.fx_count, self.lsn, self.seq_number, \
         self.hard_link_count, self.first_attr_offset, self.usage_flags, \
         self._entry_len, self.entry_alloc_len, \
@@ -240,12 +271,12 @@ class MFTHeader():
         self.mft_record = header
 
     @classmethod
-    def get_static_content_size(cls):
+    def get_representation_size(cls):
         '''Return the header size'''
         return cls._REPR.size
 
     @classmethod
-    def create_from_binary(cls, mft_config, binary_view):
+    def create_from_binary(cls, ignore_signature_check, binary_view):
         '''Creates a new object MFTHeader from a binary stream. The binary
         stream can be represented by a byte string, bytearray or a memoryview of the
         bytearray.
@@ -262,7 +293,7 @@ class MFTHeader():
             cls._REPR.unpack(binary_view[:cls._REPR.size])
 
         baad = None
-        if not mft_config.ignore_signature_check:
+        if not ignore_signature_check:
             if sig == b"FILE":
                 baad = False
             elif sig == b"BAAD":
@@ -340,6 +371,7 @@ class Datastream():
 
     def _get_content(self):
         '''Returns the content of a resident datastream'''
+        #TODO add the ability to load from non-resident when disk image is available
         if not self.is_resident():
             raise DataStreamError("Non resident datastream don't have content")
 
@@ -429,8 +461,30 @@ class Datastream():
         return f'{self.__class__.__name__}(name={self.name}, size={self.size}, alloc_size={self.alloc_size}, cluster_count={self.cluster_count}, _data_runs={self._data_runs}, _content={self._content}, _data_runs_sorted={self._data_runs_sorted})'
 
 class Attribute():
-    '''Represents an attribute, header and content. Independently the type of
-    attribute'''
+    '''Represents an MFT Attribute.
+
+    All attributes have a header and a content. Depending on the type of attribute,
+    resident or non-resident, the header has different options and the content
+    is in the MFT itself or in "data" side of the disk.
+
+    This class will load the content as long as the attribute is resident.
+
+    Args:
+        header (:obj:`BaseAttributeHeader`): The header of the attribute.
+            Effectively speaking, can be an object of ``ResidentAttrHeader`` or
+            ``NonResidentAttrHeader``.
+        content (:obj:`AttributeContentBase`): The attribute's content. Can be
+            anything as long as it inherits from the base class. For a full
+            list consult the ``attribute`` module documentation.
+
+    Attributes:
+        header (:obj:`BaseAttributeHeader`): The header of the attribute.
+            Effectively speaking, can be an object of ``ResidentAttrHeader`` or
+            ``NonResidentAttrHeader``.
+        content (:obj:`AttributeContentBase`): The attribute's content. Can be
+            anything as long as it inherits from the base class. For a full
+            list consult the ``attribute`` module documentation.
+    '''
     _dispatcher = {AttrTypes.STANDARD_INFORMATION : StandardInformation.create_from_binary,
                    AttrTypes.ATTRIBUTE_LIST : AttributeList.create_from_binary,
                    AttrTypes.FILE_NAME : FileName.create_from_binary,
@@ -448,19 +502,20 @@ class Attribute():
                    AttrTypes.LOGGED_TOOL_STREAM : LoggedToolStream,
     }
 
-
     def __init__(self, header=None, content=None):
-        '''Creates an Attribute object. The content variable is expected to be assigned
-        only in case of a resident attribute. It is recommended to use the
-        "create_from_binary" function
-
-        Args:
-            header (AttributeHeader) - The header of the attribute
-            content (Variable) - The content of the attribute. Depends on the type
-                of the attribute.
-        '''
+        '''See class docstring'''
         self.header = header
         self.content = content
+
+    def _is_resident(self):
+        '''Helper function to check if an attribute is resident or not. Returns
+        True if it is resident, otherwise returns False'''
+        return not self.header.non_resident
+
+    is_resident = property(_is_resident, doc="True if the attribute is resident, False otherwise")
+    # some properties to make the api pretty. I think direct access is faster, if necessary
+    type = property(lambda self: self.header.attr_type, doc="The type of the attribute")
+    name = property(lambda self: self.header.attr_name, doc="The name of the attribute")
 
     @classmethod
     def create_from_binary(cls, non_resident, load_dataruns, binary_view):
@@ -473,11 +528,6 @@ class Attribute():
 
         return cls(header, content)
 
-    def is_non_resident(self):
-        '''Helper function to check if an attribute is resident or not. Returns
-        True if it is resident, otherwise returns False'''
-        return self.header.is_non_resident()
-
     def __len__(self):
         '''Returns the length of the attribute, in bytes'''
         return len(self.header)
@@ -487,20 +537,33 @@ class Attribute():
         return f'{self.__class__.__name__}(header={self.header}, content={self.content})'
 
 class MFTEntry():
-    '''Represents one LOGICAL MFT entry. That means the entry is the base entry
-    and all the attributes that are spread across multiple physical entries are
-    aggregated in the base entry.
+    '''Represents one LOGICAL MFT entry.
+
+    One single MFT entry can actually have multiple entries allocated, depending
+    on the amount of attributes the entry has. It is important to take this in
+    consideration, as this class is meant to be used per logical MFT entry
+    and not per allocated entry.
+
+    All MFT entries have a header and 'n' number of attributes. A special case
+    exists for the DATA attributes, as those are interpreted and add to the what
+    is called datastream, which an entry can have 'n' as well. When an attribute
+    has multiple datastream, Microsoft calls it ADS.
+
+    Args:
+        header (:obj:`MFTHeader`): The header of the entry.
+        attrs (dict(AttrTypes : list(Attribute))): A list of the attributes
+            related to the entry.
+
+    Attributes:
+        header (:obj:`MFTHeader`): The header of the entry.
+        attrs (dict(AttrTypes : list(Attribute))): A list of the attributes
+            related to the entry.
+        data_streams (list(:obj:`Datastream`)): A list of datastreams related
+            to the entry.
     '''
 
     def __init__(self, header=None, attrs=None):
-        '''Creates a MFTEntry object.
-
-        Args:
-            header (MFTHeader) - The header of the attribute
-            attrs (`list` of Attribute) - list of Attributes that are related to
-                this entry
-            slack (binary string) - the binary stream with the slack data
-        '''
+        '''See class docstring.'''
         self.header, self.attrs, self.data_streams = header, attrs, []
 
     @classmethod
@@ -513,7 +576,8 @@ class MFTEntry():
         The binary data WILL be changed to apply the fixup array.
 
         Args:
-            mft_config (dict) - A dictionary with the configuration with what to load
+            mft_config (:obj:`MFTConfig`) - An instance of MFTConfig, as this tells
+                how the library will interpret data.
             binary_data (bytearray) - A binary stream with the data to extract.
                 This has to be a writeable and support the memoryview call
             entry_number (int) - The entry number for this entry
@@ -527,12 +591,13 @@ class MFTEntry():
         #no check is performed if an entry is empty
         #the _MFTEntryStub code SHOULD detect if there is an empty entry
         try:
-            header = MFTHeader.create_from_binary(mft_config, bin_view[:MFTHeader.get_static_content_size()])
+            header = MFTHeader.create_from_binary(mft_config.ignore_signature_check,
+                        bin_view[:MFTHeader.get_representation_size()])
         except HeaderError as e:
             e.update_entry_number(entry_number)
             e.update_entry_binary(binary_data)
             raise
-        entry = cls(header, {})
+        entry = cls(header, _defaultdict(list))
 
         if header.mft_record != entry_number:
             _MOD_LOGGER.warning("The MFT entry number doesn't match. %d != %d", entry_number, header.mft_record)
@@ -549,12 +614,19 @@ class MFTEntry():
         return entry
 
     def _find_datastream(self, name):
+        """Find and return if a datastream exists, by name."""
         for stream in self.data_streams: #search to see if this is a new datastream or a known one
             if stream.name == name:
                 return stream
         return None
 
-    def _add_datastream(self, data_attr):
+    def _add_data_attribute(self, data_attr):
+        """Add a data attribute to the datastream structure.
+
+        Data attributes require processing before they can be interpreted as
+        datastream. This function grants that it is adding the attribute to
+        the correct datastream or creating a new datastream if necessary.
+        """
         attr_name = data_attr.header.attr_name
 
         stream = self._find_datastream(attr_name)
@@ -563,41 +635,32 @@ class MFTEntry():
             self.data_streams.append(stream)
         stream.add_data_attribute(data_attr)
 
-    def _add_attribute(self, attr):
-        '''Adds one attribute to the list of attributes. Checks if the the entry
-        already has another entry of the attribute and if not, creates the necessary
-        structure'''
-        if attr.header.attr_type_id not in self.attrs:
-            self.attrs[attr.header.attr_type_id] = []
-        self.attrs[attr.header.attr_type_id].append(attr)
-
     def _load_attributes(self, mft_config, attrs_view):
-        '''This function receives a view that starts at the first attribute
-        until the end of the entry
+        '''Loads all the attributes of an entry.
+
+        Once executed, all the attributes should have been loaded in the
+        attribute *attrs* instance attribute.
+
+        Args:
+            mft_config (:obj:`MFTConfig`) - An instance of MFTConfig, as this tells
+                how the library will interpret data.
+            attrs_view (memoryview(bytearray)) - A binary stream that starts at
+                the first attribute until the end of the entry
         '''
         offset = 0
-        load_attrs = mft_config._load_attrs
-        #get_basic_attr_header_info = AttributeHeader.get_basic_attr_header_info
+        load_attrs = mft_config.attribute_load_list
 
         while (attrs_view[offset:offset+4] != b'\xff\xff\xff\xff'):
-            #pass all the information to the attr, as we don't know how
-            #much content the attribute has
-            #try:
-
             attr_type, attr_len, non_resident = _get_attr_info(attrs_view[offset:])
             if attr_type in load_attrs:
+                # pass all the information to the attr, as we don't know how
+                # much content the attribute has
                 attr = Attribute.create_from_binary(non_resident, mft_config.load_dataruns, attrs_view[offset:])
                 if not attr.header.attr_type_id is AttrTypes.DATA:
-                    self._add_attribute(attr)
+                    self.attrs[attr.header.attr_type_id].append(attr) #add an attribute
                 else:
-                    self._add_datastream(attr)
+                    self._add_data_attribute(attr)
             offset += attr_len
-
-
-            # except EntryError as e:
-            #     e.update_entry_number(entry_number)
-            #     e.update_entry_binary(binary_data)
-
 
     def merge_entries(self, source_entry):
         '''Merge one entry attributes and datastreams with the current entry.
@@ -606,7 +669,7 @@ class MFTEntry():
         #copy the attributes
         for list_attr in source_entry.attrs.values():
             for attr in list_attr:
-                self._add_attribute(attr)
+                self.attrs[attr.header.attr_type_id].append(attr) #add an attribute
         #copy data_streams
         for stream in source_entry.data_streams:
             dest_stream = self._find_datastream(stream.name)

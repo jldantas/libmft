@@ -97,15 +97,16 @@ def test_my_mft():
         my_mft/5213 - filenames (multiple names one entry)
     '''
 
-
     with open(test, "rb") as mft_file:
         #mft = libmft.api.MFT(mft_file)
         mft = libmft.api.MFT(mft_file, mft_config)
         #print(mft[75429])
-        [print(a.dataruns) for a in mft[75429].data_streams if not a.is_resident]
-        print("*"*80,"\n",mft[75429])
+        #[print(a.dataruns) for a in mft[75429].data_streams if not a.is_resident]
+        #print("*"*80,"\n",mft[75429])
         #test_1(mft)
         for entry in mft:
+            if len(entry.data_streams) > 2:
+                print(entry)
             # try:
             #     print(mft.get_entry_full_path(entry=entry))
             # except EntryError as e:
