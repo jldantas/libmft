@@ -102,7 +102,7 @@ P.S.: The implementation I used can be seen in the file parallel.py
 
 ## CHANGELOG
 
-### Current CL
+### Version 0.8
 
 - Added removed entries to the STANDARD_INFORMATION attribute
 - Added removed entries to the FILE_NAME attribute
@@ -113,6 +113,7 @@ P.S.: The implementation I used can be seen in the file parallel.py
 - Fixed a problem with symbolic links and junction points
 - Small fix for reparse point flags
 - Changed how attribute headers are represented (API break)
+- Code reorganization
 
 ### Version 0.7
 
