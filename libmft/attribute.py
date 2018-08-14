@@ -706,7 +706,7 @@ def _astimezone_ts(self, timezone):
     if self.created.tzinfo is timezone:
         return self
     else:
-        nw_obj = cls((None,)*4)
+        nw_obj = Timestamps((None,)*4)
         nw_obj.created = self.created.astimezone(timezone)
         nw_obj.changed = self.changed.astimezone(timezone)
         nw_obj.mft_changed = self.mft_changed.astimezone(timezone)
