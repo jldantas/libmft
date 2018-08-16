@@ -889,10 +889,15 @@ class MFT():
         self._entries_child_parent = {} #holds the relation between child and parent
         self._empty_entries = set() #holds the empty entries
         self._number_valid_entries = 0
+        # as we consider logic values, a translation table converts from the
+        # logical index to the real index in the file, this allows consistency
+        # in the class
+        self._translation_table = []
 
         if not self.mft_entry_size: #if entry size is zero, try to autodetect
             _MOD_LOGGER.info("Trying to detect MFT size entry")
             self.mft_entry_size = MFT._find_mft_size(file_pointer)
+        self.total_amount_entries = int(_get_file_size(self.file_pointer)/self.mft_entry_size)
 
         if self.mft_config.create_initial_information:
             self._load_stub_info()
@@ -908,26 +913,37 @@ class MFT():
         mft_entry_size = self.mft_entry_size
         read_size = _MFTEntryStub.get_representation_size()
         data_buffer = bytearray(read_size)
-        temp = []
+        temp = [None] * self.total_amount_entries
 
-        #loads minimum amount of data from the file for now
-        _MOD_LOGGER.info("Loading basic info from file...")
         for i in range(0, _get_file_size(self.file_pointer), mft_entry_size):
             mft_record_n = int(i/mft_entry_size)    #calculate which is the entry number
             self.file_pointer.seek(i)
             self.file_pointer.readinto(data_buffer)
             stub = _MFTEntryStub.load_from_file_pointer(data_buffer, mft_record_n)
-            temp.append(stub)
-        #from the information loaded, find which entries are related and the one that are empty
-        _MOD_LOGGER.info("Mapping related entries...")
-        for i, stub in enumerate(temp):
-            if stub is not None:
-                self._number_valid_entries += 1
-                if stub.base_record_ref and temp[stub.base_record_ref].is_related(stub): #stub.base_record_ref is not 0
-                    self._entries_parent_child[stub.base_record_ref].append(stub.mft_record)
-                    self._entries_child_parent[stub.mft_record] = stub.base_record_ref
-            else:
-                self._empty_entries.add(i)
+            if stub is not None: #if the entry is not empty
+                if stub.base_record_ref: #if the entry has a parent, base_record_ref != 0
+                    if temp[stub.base_record_ref] is None: # if the parent hasn't been loaded, load it
+                        self.file_pointer.seek(stub.base_record_ref * mft_entry_size)
+                        self.file_pointer.readinto(data_buffer)
+                        temp[stub.base_record_ref] = _MFTEntryStub.load_from_file_pointer(data_buffer, stub.base_record_ref)
+                    if temp[stub.base_record_ref].is_related(stub):
+                        self._entries_parent_child[stub.base_record_ref].append(stub.mft_record)
+                        self._entries_child_parent[stub.mft_record] = stub.base_record_ref
+                    else:
+                        self._number_valid_entries += 1
+                        self._translation_table.append(mft_record_n)
+                else:
+                    self._number_valid_entries += 1
+                    self._translation_table.append(mft_record_n)
+            else: #if it is empty
+                self._empty_entries.add(mft_record_n)
+            temp[mft_record_n] = stub
+
+        # print("total amount of entries:", len(temp))
+        # print("amount empty:", len(self._empty_entries))
+        # print("amount of entries with parents:", len(self._entries_child_parent))
+        # print("valid_entries:", self._number_valid_entries, "sum:", self._number_valid_entries + len(self._entries_child_parent) + len(self._empty_entries))
+        # print("translation table size:", len(self._translation_table))
 
     def _read_full_entry(self, entry_number):
         if entry_number in self._entries_parent_child:
@@ -1020,30 +1036,46 @@ class MFT():
 
         return (is_orphan, "\\".join(reversed(names)))
 
+    def read_physical_entry(self, entry_number):
+        """Returns a physical MFT entry.
+
+        The library considers logical MFT entries, i.e., it will read all the
+        related entries and present that as a single entry. However, if you have
+        a need to read the physical entry itself, you can use this function.
+
+        This takes the entry number and returns the entry.
+
+        Note:
+            This does not verify if the entry is empty or if it is related to
+            other entries. By using this method it is YOUR responsibility to
+            the these checks, if necessary.
+
+        Args:
+            entry_number (int): The number of the entry
+
+        Returns
+            (MFTEntry): The entry loaded. None if the entry is empty
+        """
+        if entry_number >= self.total_amount_entries:
+            raise IndexError("Entry number out of bounds")
+        return self._read_full_entry(entry_number)
+
     def __iter__(self):
         returned = 0
 
-        for i in range(0, _get_file_size(self.file_pointer), self.mft_entry_size):
-            mft_record_n = int(i/self.mft_entry_size)
-            if returned > self._number_valid_entries:
-                #TODO customize this exception
-                raise MFTError("Something is wrong...")
-            if mft_record_n in self._empty_entries or mft_record_n in self._entries_child_parent:
-                continue
-            else:
-                returned += 1
-                yield self[mft_record_n]
+        for i in range(0, self._number_valid_entries):
+            yield self[i]
 
     @lru_cache(1024)
     def __getitem__(self, index):
         '''Return the specific MFT entry. In case of an empty MFT, it will return
         None'''
-        if index in self._empty_entries:
-            raise ValueError(f"Entry {index} is empty.")
-        if index in self._entries_child_parent:
-            raise ValueError(f"Entry {index} is a child entry.")
+        try:
+            real_index = self._translation_table[index]
+        except IndexError:
+            raise IndexError(f"Invalid index {index}. Can't be higher or equal than {self._number_valid_entries}")
 
-        return self._read_full_entry(index)
+        return self._read_full_entry(real_index)
 
     def __len__(self):
         return self._number_valid_entries
