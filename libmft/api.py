@@ -889,10 +889,6 @@ class MFT():
         self._entries_child_parent = {} #holds the relation between child and parent
         self._empty_entries = set() #holds the empty entries
         self._number_valid_entries = 0
-        # as we consider logic values, a translation table converts from the
-        # logical index to the real index in the file, this allows consistency
-        # in the class
-        self._translation_table = []
 
         if not self.mft_entry_size: #if entry size is zero, try to autodetect
             _MOD_LOGGER.info("Trying to detect MFT size entry")
@@ -931,10 +927,8 @@ class MFT():
                         self._entries_child_parent[stub.mft_record] = stub.base_record_ref
                     else:
                         self._number_valid_entries += 1
-                        self._translation_table.append(mft_record_n)
                 else:
                     self._number_valid_entries += 1
-                    self._translation_table.append(mft_record_n)
             else: #if it is empty
                 self._empty_entries.add(mft_record_n)
             temp[mft_record_n] = stub
@@ -964,57 +958,28 @@ class MFT():
 
         return entry
 
-    # def copy_from_loaded_mft(other_mft):
-    #     #TODO do we need this?
-    #     import copy
-    #     self._entries_parent_child = copy.deepcopy(other_mft._entries_parent_child)
-    #     self._entries_child_parent = copy.deepcopy(other_mft._entries_child_parent)
-    #     self._empty_entries = copy.deepcopy(other_mft._empty_entries)
-    #     self._number_valid_entries = other_mft._number_valid_entries
+    @lru_cache(1024)
+    def _compute_full_path(self, fn_parent_ref, fn_parent_seq):
+        '''Based on the parent reference and sequence, computes the full path.
 
-    def get_entry_full_path(self, entry_number=None, entry=None):
-        '''Returns the full path of an entry.
-
-        Entries have only their own name and references. To build a full path
-        it is necessary to jump across the MFT using the reference to rebuild
-        the path.
-
-        Also, the MFT entry might still exist, but the file has been deleted,
-        depending on the state of the MFT, the path might not be fully reconstructable,
-        these entries are called "orphan".
-
-        Note:
-            Only use entry_number OR entry parameter. Providing both of them is
-            going to cause an exception.
+        The majority of the files in a filesystem has a very small amount of
+        parent directories. By definition, a filesystem is expected to have
+        much smaller amount of directories than files. As such we use a function
+        with the minimal amount of arguments to find a parent, that way we can
+        cache the results easily and speed up the overall code.
 
         Args:
-            entry_number (int): Entry number
-            entry_number (:obj:`MFTEntry`): Entry
+            fn_parent_ref (int): Parent reference number
+            fn_parent_seq (int): Parent sequence number
 
         Returns:
             tuple(bool, str): A tuple where the first element is a boolean that
                 is ``True`` if the the file is orphan and ``False`` if not. The
-                second element is a string with the full path
+                second element is a string with the full path without the file name
         '''
-        if entry_number is None and entry is None:
-            raise MFTError("Provide entry_number or entry parameters")
-        if entry_number is not None and entry is not None:
-            raise MFTError("Can't provide both entry_number and entry")
-
-        if entry_number:
-            working_entry = self[entry_number]
-        elif entry:
-            working_entry = entry
-        else:
-            raise MFTError("Something went very wrong when parsing the function arguments.")
-
-        fn_attr = working_entry.get_main_filename_attr()
-        if fn_attr is None:
-            raise EntryError("No FILENAME attribute available, can't calculate path", b"", working_entry.header.mft_record)
-
-        names = [fn_attr.content.name]
+        names = []
         root_id = 5
-        index, seq = fn_attr.content.parent_ref, fn_attr.content.parent_seq
+        index, seq = fn_parent_ref, fn_parent_seq
         is_orphan = False
 
         #search until hit the root entry
@@ -1036,46 +1001,59 @@ class MFT():
 
         return (is_orphan, "\\".join(reversed(names)))
 
-    def read_physical_entry(self, entry_number):
-        """Returns a physical MFT entry.
 
-        The library considers logical MFT entries, i.e., it will read all the
-        related entries and present that as a single entry. However, if you have
-        a need to read the physical entry itself, you can use this function.
+    def get_full_path(self, fn_attr):
+        '''Returns the full path of a FILENAME.
 
-        This takes the entry number and returns the entry.
+        The NTFS filesystem allows for things called hardlinks. Hard links are
+        saved, internally, as different filename attributes. Because of this,
+        an entry can, when dealing with full paths, have multiple full paths.
 
-        Note:
-            This does not verify if the entry is empty or if it is related to
-            other entries. By using this method it is YOUR responsibility to
-            the these checks, if necessary.
+        As such, this function receives a fn_attr and uses it to compute
+        the full path for this particular attribute.
+
+        Also, the MFT entry might still exist, but the file has been deleted,
+        depending on the state of the MFT, the path might not be fully reconstructable,
+        these entries are called "orphan".
 
         Args:
-            entry_number (int): The number of the entry
+            fn_attr (:obj:`Attribute`): An attribute that has a FILENAME as content
 
-        Returns
-            (MFTEntry): The entry loaded. None if the entry is empty
-        """
-        if entry_number >= self.total_amount_entries:
-            raise IndexError("Entry number out of bounds")
-        return self._read_full_entry(entry_number)
+        Returns:
+            tuple(bool, str): A tuple where the first element is a boolean that
+                is ``True`` if the the file is orphan and ``False`` if not. The
+                second element is a string with the full path
+        '''
+        if fn_attr.header.attr_type_id is not AttrTypes.FILE_NAME:
+            raise MFTError("Need a filename attribute to compute full path.")
+
+        orphan, path = self._compute_full_path(fn_attr.content.parent_ref, fn_attr.content.parent_seq)
+        return (orphan, "\\".join([path, fn_attr.content.name]))
+
+    def splice_generator(self, start, end):
+        for i in range(start, end):
+            if i not in self._empty_entries and i not in self._entries_child_parent:
+                yield self[i]
 
     def __iter__(self):
-        returned = 0
+        '''Iterates only over valid entries, that means, no empty entries and
+        no child entries.'''
 
-        for i in range(0, self._number_valid_entries):
-            yield self[i]
+        for i in range(0, self.total_amount_entries):
+            if i not in self._empty_entries and i not in self._entries_child_parent:
+                yield self[i]
 
     @lru_cache(1024)
     def __getitem__(self, index):
         '''Return the specific MFT entry. In case of an empty MFT, it will return
         None'''
-        try:
-            real_index = self._translation_table[index]
-        except IndexError:
-            raise IndexError(f"Invalid index {index}. Can't be higher or equal than {self._number_valid_entries}")
+        if index >= self.total_amount_entries:
+            raise IndexError("Entry number out of bounds")
 
-        return self._read_full_entry(real_index)
+        if index not in self._empty_entries:
+            return self._read_full_entry(index)
+        else:
+            return None
 
     def __len__(self):
         return self._number_valid_entries

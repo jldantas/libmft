@@ -104,14 +104,34 @@ def test_my_mft():
         #[print(a.dataruns) for a in mft[75429].data_streams if not a.is_resident]
         #print("*"*80,"\n",mft[75429])
         #test_1(mft)
+        #print("sauce", mft.read_physical_entry(192))#242495))
+        print(mft[33])
+        print("************ MAIN FN ******************")
+        print(mft[33].get_main_filename_attr())
+        print("************ ATTRS ******************")
+        for attr in mft[33].get_attributes(AttrTypes.FILE_NAME):
+            print(attr)
+
+        print(mft.get_full_path(mft[33].get_main_filename_attr()))
+        #print(mft.read_physical_entry(4584))
+        # print(mft.read_physical_entry(9263))
+        # print(mft._translation_table[9263], mft[9263])
+        # print(mft.read_physical_entry(9385))
+        # print(mft._translation_table[9384])
         for entry in mft:
-            # if len(entry.data_streams) > 2:
+            # if entry.header.hard_link_count > 2:
             #     print(entry)
-            # try:
-            #     print(mft.get_entry_full_path(entry=entry))
-            # except EntryError as e:
-            #     print("No available path")
+            #     print("*"*80)
             pass
+
+        # for entry in mft:
+        #     # if len(entry.data_streams) > 2:
+        #     #     print(entry)
+        #     # try:
+        #     #     print(mft.get_entry_full_path(entry=entry))
+        #     # except EntryError as e:
+        #     #     print("No available path")
+        #     pass
 
 def test_botched_header():
     test = "../data.bin"
