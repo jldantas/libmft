@@ -1496,7 +1496,7 @@ Bitmap = _create_attrcontent_class("Bitmap",
 # REPARSE_POINT ATTRIBUTE
 #******************************************************************************
 
-def _from_binary_junc_mnt(cls, binary_view):
+def _from_binary_junc_mnt(cls, binary_stream):
     """See base class."""
     ''' Offset to target name - 2 (relative to 16th byte)
         Length of target name - 2
@@ -1504,16 +1504,18 @@ def _from_binary_junc_mnt(cls, binary_view):
         Length of print name - 2
     '''
     offset_target_name, len_target_name, offset_print_name, len_print_name = \
-        cls._REPR.unpack(binary_view[:cls._REPR.size])
+        cls._REPR.unpack(binary_stream[:cls._REPR.size])
 
     offset = cls._REPR.size + offset_target_name
-    target_name = binary_view[offset:offset+len_target_name].tobytes().decode("utf_16_le")
+    target_name = binary_stream[offset:offset+len_target_name].tobytes().decode("utf_16_le")
     offset = cls._REPR.size + offset_print_name
-    print_name = binary_view[offset:offset+len_print_name].tobytes().decode("utf_16_le")
+    print_name = binary_stream[offset:offset+len_print_name].tobytes().decode("utf_16_le")
+
+    nw_obj = cls((target_name, print_name))
 
     _MOD_LOGGER.debug("Attempted to unpack Junction or MNT point from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
 
-    return cls((target_name, print_name))
+    return nw_obj
 
 def _len_junc_mnt(self):
     '''Returns the size of the bitmap in bytes'''
@@ -1542,7 +1544,7 @@ JunctionOrMount = _create_attrcontent_class("JunctionOrMount",
 
 #------------------------------------------------------------------------------
 
-def _from_binary_syn_link(cls, binary_view):
+def _from_binary_syn_link(cls, binary_stream):
     """See base class."""
     ''' Offset to target name - 2 (relative to 16th byte)
         Length of target name - 2
@@ -1552,16 +1554,18 @@ def _from_binary_syn_link(cls, binary_view):
     '''
     offset_target_name, len_target_name, offset_print_name, \
     len_print_name, syn_flags = \
-        cls._REPR.unpack(binary_view[:cls._REPR.size])
+        cls._REPR.unpack(binary_stream[:cls._REPR.size])
 
     offset = cls._REPR.size + offset_target_name
-    target_name = binary_view[offset:len_target_name].tobytes().decode("utf_16_le")
+    target_name = binary_stream[offset:offset+len_target_name].tobytes().decode("utf_16_le")
     offset = cls._REPR.size + offset_print_name
-    print_name = binary_view[offset:offset+len_print_name].tobytes().decode("utf_16_le")
+    print_name = binary_stream[offset:offset+len_print_name].tobytes().decode("utf_16_le")
+
+    nw_obj = cls((target_name, print_name, SymbolicLinkFlags(syn_flags)))
 
     _MOD_LOGGER.debug("Attempted to unpack Symbolic Link from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
 
-    return cls((target_name, print_name, SymbolicLinkFlags(syn_flags)))
+    return nw_obj
 
 def _len_syn_link(self):
     '''Returns the size of the bitmap in bytes'''
@@ -1592,7 +1596,7 @@ SymbolicLink = _create_attrcontent_class("SymbolicLink",
 
 #------------------------------------------------------------------------------
 
-def _from_binary_reparse(cls, binary_view):
+def _from_binary_reparse(cls, binary_stream):
     """See base class."""
     ''' Reparse type flags - 4
             Reparse tag - 4 bits
@@ -1602,7 +1606,7 @@ def _from_binary_reparse(cls, binary_view):
         Padding - 2
     '''
     #content = cls._REPR.unpack(binary_view[:cls._REPR.size])
-    reparse_tag, data_len = cls._REPR.unpack(binary_view[:cls._REPR.size])
+    reparse_tag, data_len = cls._REPR.unpack(binary_stream[:cls._REPR.size])
 
     #reparse_tag (type, flags) data_len, guid, data
     reparse_type = ReparseType(reparse_tag & 0x0000FFFF)
@@ -1610,18 +1614,18 @@ def _from_binary_reparse(cls, binary_view):
     guid = None #guid exists only in third party reparse points
     if reparse_flags & ReparseFlags.IS_MICROSOFT:#a microsoft tag
         if reparse_type is ReparseType.SYMLINK:
-            data = SymbolicLink.create_from_binary(binary_view[cls._REPR.size:])
+            data = SymbolicLink.create_from_binary(binary_stream[cls._REPR.size:])
         elif reparse_type is ReparseType.MOUNT_POINT:
-            data = JunctionOrMount.create_from_binary(binary_view[cls._REPR.size:])
+            data = JunctionOrMount.create_from_binary(binary_stream[cls._REPR.size:])
         else:
-            data = binary_view[cls._REPR.size:].tobytes()
+            data = binary_stream[cls._REPR.size:].tobytes()
     else:
-        guid = UUID(bytes_le=binary_view[cls._REPR.size:cls._REPR.size+16].tobytes())
-        data = binary_view[cls._REPR.size+16:].tobytes()
-
-    _MOD_LOGGER.debug("Attempted to unpack REPARSE_POINT from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
+        guid = UUID(bytes_le=binary_stream[cls._REPR.size:cls._REPR.size+16].tobytes())
+        data = binary_stream[cls._REPR.size+16:].tobytes()
 
     nw_obj = cls((reparse_type, reparse_flags, data_len, guid, data))
+
+    _MOD_LOGGER.debug("Attempted to unpack REPARSE_POINT from \"%s\"\nResult: %s", binary_stream.tobytes(), nw_obj)
 
     return nw_obj
 
