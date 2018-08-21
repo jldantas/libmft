@@ -606,26 +606,26 @@ class MFTEntry():
         bin_view = memoryview(binary_data)
         entry = None
 
-        #no check is performed if an entry is empty
-        #the _MFTEntryStub code SHOULD detect if there is an empty entry
-        try:
-            header = MFTHeader.create_from_binary(mft_config.ignore_signature_check,
-                        bin_view[:MFTHeader.get_representation_size()])
-        except HeaderError as e:
-            e.update_entry_number(entry_number)
-            e.update_entry_binary(binary_data)
-            raise
-        entry = cls(header, _defaultdict(list))
+        #test if the entry is empty
+        if bin_view[0:4] != b"\x00\x00\x00\x00":
+            try:
+                header = MFTHeader.create_from_binary(mft_config.ignore_signature_check,
+                            bin_view[:MFTHeader.get_representation_size()])
+            except HeaderError as e:
+                e.update_entry_number(entry_number)
+                e.update_entry_binary(binary_data)
+                raise
+            entry = cls(header, _defaultdict(list))
 
-        if header.mft_record != entry_number:
-            _MOD_LOGGER.warning("The MFT entry number doesn't match. %d != %d", entry_number, header.mft_record)
-        if len(binary_data) != header.entry_alloc_len:
-            _MOD_LOGGER.error("Expected MFT size is different than entry size.")
-            raise EntryError(f"Expected MFT size ({len(binary_data)}) is different than entry size ({header.entry_alloc_len}).", binary_data, entry_number)
-        if mft_config.apply_fixup_array:
-            apply_fixup_array(bin_view, header.fx_offset, header.fx_count, header.entry_alloc_len)
+            if header.mft_record != entry_number:
+                _MOD_LOGGER.warning("The MFT entry number doesn't match. %d != %d", entry_number, header.mft_record)
+            if len(binary_data) != header.entry_alloc_len:
+                _MOD_LOGGER.error("Expected MFT size is different than entry size.")
+                raise EntryError(f"Expected MFT size ({len(binary_data)}) is different than entry size ({header.entry_alloc_len}).", binary_data, entry_number)
+            if mft_config.apply_fixup_array:
+                apply_fixup_array(bin_view, header.fx_offset, header.fx_count, header.entry_alloc_len)
 
-        entry._load_attributes(mft_config, bin_view[header.first_attr_offset:])
+            entry._load_attributes(mft_config, bin_view[header.first_attr_offset:])
 
         bin_view.release() #release the underlying buffer
 
@@ -805,65 +805,6 @@ class MFTEntry():
         return self.__class__.__name__ + '(header={}, attrs={}, data_stream={})'.format(
             self.header, self.attrs, self.data_streams)
 
-class _MFTEntryStub():
-    #TODO create a way of dealing with XP only artefacts
-    _REPR = struct.Struct("<16xH14xQ")
-    ''' Ignore the first 16 bytes (Signature, fix up array offset, count and
-            lsn)
-        Sequence number - 2
-        Ignore the next 14 bytes (hard link count, offset to 1st attr, usage flags,
-            mft logical size and physical size)
-        Base record # - 8
-    '''
-    def __init__(self, content=(None,)*4):
-        self.mft_record, self.seq_number, self.base_record_ref, \
-        self.base_record_seq = content
-
-    @classmethod
-    def load_from_file_pointer(cls, binary_stream, record_n):
-        nw_obj = None
-
-        if binary_stream[0:4] != b"\x00\x00\x00\x00": #test if the entry is empty
-            #the position of the data we are interested is always (or should) happen before the
-            #first fixup value, so no need to apply it
-            seq_number, ref = cls._REPR.unpack(binary_stream)
-            file_ref, file_seq = get_file_reference(ref)
-
-            nw_obj = cls((record_n, seq_number, file_ref, file_seq))
-        else:
-            _MOD_LOGGER.debug("Entry %d is empty.", record_n)
-
-        return nw_obj
-
-    @classmethod
-    def get_representation_size(cls):
-        '''Returns the static size of the content never taking in consideration
-        variable fields, for example, names.
-
-        Returns:
-            int: The size of the content, in bytes
-        '''
-        return cls._REPR.size
-
-    def is_related(self, child_entry):
-        '''Compares if two entries are related, based on the reference and sequence
-        numbers.
-
-        Args:
-            child_entry (_MFTEntryStub) - Entry to compare if the it is child or not
-
-        Returns:
-            (bool): True if the entries are related, False otherwise'''
-        if self.mft_record == child_entry.base_record_ref and \
-           self.seq_number == child_entry.base_record_seq:
-            return True
-        else:
-            return False
-
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return f'{self.__class__.__name__}(mft_record={self.mft_record}, seq_number={self.seq_number}, base_record_ref={self.base_record_ref}, base_record_seq={self.base_record_seq})'
-
 class MFT():
     '''Represents a MFT.
 
@@ -887,7 +828,6 @@ class MFT():
         self.mft_entry_size = self.mft_config.entry_size
         self._entries_parent_child = _defaultdict(list) #holds the relation ship between parent and child
         self._entries_child_parent = {} #holds the relation between child and parent
-        self._empty_entries = set() #holds the empty entries
         self._number_valid_entries = 0
 
         if not self.mft_entry_size: #if entry size is zero, try to autodetect
@@ -896,48 +836,49 @@ class MFT():
         self.total_amount_entries = int(_get_file_size(self.file_pointer)/self.mft_entry_size)
 
         if self.mft_config.create_initial_information:
-            self._load_stub_info()
+            self._load_relationship_info()
 
-    def _load_stub_info(self):
-        '''Load the minimum amount of information related to a MFT. This allows
-        the library to map all the relations between the entries, so the information
-        is complete when dealing with the entries.
+    def _load_relationship_info(self):
+        """Maps parent and child entries in the MFT.
 
-        This is necessary because the ATTRIBUTE_LIST can be non-resident and, in
-        this case, we can't find the relationship using only the entry.
-        '''
+        Because the library expects the MFT file to be provided, it doesn't
+        have access to anything non-resident. Because of that, if we want all
+        the information related to the entry, it is necessary to visit all the
+        entries and map the relationship between each of them.
+
+        Note:
+            Because the data necessary to do this should always happen before
+            the first fixup entry, we don't need to apply it.
+        """
         mft_entry_size = self.mft_entry_size
-        read_size = _MFTEntryStub.get_representation_size()
-        data_buffer = bytearray(read_size)
-        temp = [None] * self.total_amount_entries
+        fp = self.file_pointer
+        record_n = 0
+        #define the minimum amount that needs to be read
+        base_struct = struct.Struct("<Q")
+        base_struct_offset = 32
+        seq_struct = struct.Struct("<H")
+        seq_struct_offset = 16
 
+        buffer_base = bytearray(base_struct.size)
+        buffer_seq = bytearray(seq_struct.size)
+        #go over the file using the entry size as setp
         for i in range(0, _get_file_size(self.file_pointer), mft_entry_size):
-            mft_record_n = int(i/mft_entry_size)    #calculate which is the entry number
-            self.file_pointer.seek(i)
-            self.file_pointer.readinto(data_buffer)
-            stub = _MFTEntryStub.load_from_file_pointer(data_buffer, mft_record_n)
-            if stub is not None: #if the entry is not empty
-                if stub.base_record_ref: #if the entry has a parent, base_record_ref != 0
-                    if temp[stub.base_record_ref] is None: # if the parent hasn't been loaded, load it
-                        self.file_pointer.seek(stub.base_record_ref * mft_entry_size)
-                        self.file_pointer.readinto(data_buffer)
-                        temp[stub.base_record_ref] = _MFTEntryStub.load_from_file_pointer(data_buffer, stub.base_record_ref)
-                    if temp[stub.base_record_ref].is_related(stub):
-                        self._entries_parent_child[stub.base_record_ref].append(stub.mft_record)
-                        self._entries_child_parent[stub.mft_record] = stub.base_record_ref
-                    else:
-                        self._number_valid_entries += 1
+            record_n = int(i/mft_entry_size)
+            fp.seek(i + base_struct_offset)
+            fp.readinto(buffer_base)
+            base_ref, base_seq = get_file_reference(base_struct.unpack(buffer_base)[0])
+            if base_ref:
+                #calculate and prepare to read the sequence number
+                fp.seek((base_ref * mft_entry_size) + seq_struct_offset)
+                fp.readinto(buffer_seq)
+                seq, = seq_struct.unpack(buffer_seq)
+                if seq == base_seq: #entries are related
+                    self._entries_parent_child[base_ref].append(record_n)
+                    self._entries_child_parent[record_n] = base_ref
                 else:
                     self._number_valid_entries += 1
-            else: #if it is empty
-                self._empty_entries.add(mft_record_n)
-            temp[mft_record_n] = stub
-
-        # print("total amount of entries:", len(temp))
-        # print("amount empty:", len(self._empty_entries))
-        # print("amount of entries with parents:", len(self._entries_child_parent))
-        # print("valid_entries:", self._number_valid_entries, "sum:", self._number_valid_entries + len(self._entries_child_parent) + len(self._empty_entries))
-        # print("translation table size:", len(self._translation_table))
+            else:
+                self._number_valid_entries += 1
 
     def _read_full_entry(self, entry_number):
         if entry_number in self._entries_parent_child:
@@ -1031,17 +972,24 @@ class MFT():
         return (orphan, "\\".join([path, fn_attr.content.name]))
 
     def splice_generator(self, start, end):
+        entry = None
+
         for i in range(start, end):
-            if i not in self._empty_entries and i not in self._entries_child_parent:
-                yield self[i]
+            if i not in self._entries_child_parent:
+                entry = self[i]
+                if entry is not None:
+                    yield entry
 
     def __iter__(self):
         '''Iterates only over valid entries, that means, no empty entries and
         no child entries.'''
+        entry = None
 
         for i in range(0, self.total_amount_entries):
-            if i not in self._empty_entries and i not in self._entries_child_parent:
-                yield self[i]
+            if i not in self._entries_child_parent:
+                entry = self[i]
+                if entry is not None:
+                    yield entry
 
     @lru_cache(1024)
     def __getitem__(self, index):
@@ -1050,10 +998,7 @@ class MFT():
         if index >= self.total_amount_entries:
             raise IndexError("Entry number out of bounds")
 
-        if index not in self._empty_entries:
-            return self._read_full_entry(index)
-        else:
-            return None
+        return self._read_full_entry(index)
 
     def __len__(self):
         return self._number_valid_entries

@@ -85,7 +85,7 @@ def test_my_mft():
     mft_config.load_idx_root = False
     mft_config.load_idx_alloc = False
     mft_config.load_bitmap = False
-    mft_config.load_reparse = True
+    mft_config.load_reparse = False
     mft_config.load_ea_info = False
     mft_config.load_ea = False
     mft_config.load_log_tool_str = False
@@ -101,37 +101,17 @@ def test_my_mft():
         #mft = libmft.api.MFT(mft_file)
         mft = libmft.api.MFT(mft_file, mft_config)
         #print(mft[75429])
-        #[print(a.dataruns) for a in mft[75429].data_streams if not a.is_resident]
-        #print("*"*80,"\n",mft[75429])
-        #test_1(mft)
-        #print("sauce", mft.read_physical_entry(192))#242495))
-        print(mft[71952])
-        # print("************ MAIN FN ******************")
-        # print(mft[33].get_main_filename_attr())
-        # print("************ ATTRS ******************")
-        # for attr in mft[33].get_attributes(AttrTypes.FILE_NAME):
-        #     print(attr)
-        #
-        # print(mft.get_full_path(mft[33].get_main_filename_attr()))
-        #print(mft.read_physical_entry(4584))
-        # print(mft.read_physical_entry(9263))
-        # print(mft._translation_table[9263], mft[9263])
-        # print(mft.read_physical_entry(9385))
-        # print(mft._translation_table[9384])
-        # for entry in mft:
+        for entry in mft:
             # if entry.has_attribute(AttrTypes.REPARSE_POINT):
-            #     print(entry)
+            #     attrs = entry.get_attributes(AttrTypes.REPARSE_POINT)
+            #     for attr in attrs:
+            #         try:
+            #             print(entry.header.mft_record, str(attr.content.reparse_type), "\n", attr.content.data.target_name, attr.content.data.print_name)
+            #         except AttributeError as e:
+            #             pass
             #     print("*"*80)
-            # pass
+            pass
 
-        # for entry in mft:
-        #     # if len(entry.data_streams) > 2:
-        #     #     print(entry)
-        #     # try:
-        #     #     print(mft.get_entry_full_path(entry=entry))
-        #     # except EntryError as e:
-        #     #     print("No available path")
-        #     pass
 
 def test_botched_header():
     test = "../data.bin"

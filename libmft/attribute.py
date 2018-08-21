@@ -2262,7 +2262,7 @@ def _from_binary_sec_desc(cls, binary_stream):
         dacl = ACL.create_from_binary(binary_stream[header.dacl_offset:])
 
     nw_obj = cls((header, owner_sid, group_sid, sacl, dacl))
-    print(nw_obj)
+    
     return nw_obj
 
 
